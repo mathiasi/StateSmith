@@ -42,8 +42,7 @@ public class SmToOrderedNamedVerticesVisitor : VertexVisitor
 
     public override void Visit(OrthoState v)
     {
-        throw new VertexValidationException(v, "Ortho states not implemented, yet. TODO create a github issues to track this.");
-        // namedVertices.Add(v);
+        Visit((State)v); // regions are states (EXPERIMENTAL orthogonal regions)
     }
 
     public override void Visit(Vertex v)

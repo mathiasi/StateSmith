@@ -300,12 +300,22 @@ public abstract class Vertex
         return parents;
     }
 
+    /// <summary>
+    /// The first ancestor with a behavior for the event. The search stops at a region boundary (<see cref="OrthoState"/>):
+    /// an event that isn't handled inside a region is handed back to the region dispatcher, which offers it to the
+    /// orthogonal parent only if no region consumed it.
+    /// </summary>
     public NamedVertex? FirstAncestorThatHandlesEvent(string eventName)
     {
         Vertex? current = this.Parent;
 
         while (current != null)
         {
+            if (current is OrthoState)
+            {
+                return null; // region boundary
+            }
+
             if (TriggerHelper.HasBehaviorsWithTrigger(current, eventName))
             {
                 return (NamedVertex)current;

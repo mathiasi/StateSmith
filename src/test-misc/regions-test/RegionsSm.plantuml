@@ -1,0 +1,99 @@
+@startuml RegionsSm
+
+' Semantics test for orthogonal regions (EXPERIMENTAL). Every enter/exit/action is traced through the host.
+' Generated to Rust and TypeScript; StateSmithTest/Output/Regions/RegionsTests.cs checks the traces.
+
+/'! $CONFIG : toml
+[RenderConfig.Portable]
+Functions = """
+void trace(string msg);
+"""
+Variables = """
+uint ticks = 0;
+"""
+'/
+
+[*] --> IDLE
+state IDLE
+state PAR {
+    [*] --> A1
+    state A1
+    state A2
+    state A3 {
+        [*] --> X1
+        state X1
+        state X2
+        ||
+        [*] --> Y1
+        state Y1
+    }
+    --
+    [*] --> B1
+    state B1
+    state B2 {
+        [*] --> B2a
+        state B2a
+        state B2b
+    }
+    state B3
+}
+
+IDLE : enter / trace("enter IDLE");
+IDLE : exit / trace("exit IDLE");
+IDLE --> PAR : GO
+IDLE --> B2b : DEEP
+
+PAR : enter / trace("enter PAR");
+PAR : exit / trace("exit PAR");
+PAR : EV2 / trace("PAR handles EV2");
+PAR : do / trace("PAR do");
+PAR --> IDLE : RESET / trace("PAR RESET");
+
+A1 : enter / trace("enter A1");
+A1 : exit / trace("exit A1");
+A1 --> A2 : EV1
+
+A2 : enter / trace("enter A2");
+A2 : exit / trace("exit A2");
+A2 : EV2 / trace("A2 handles EV2");
+A2 --> IDLE : LEAVE
+
+' Nested regions: A3 (inside region 1 of PAR) has its own two regions.
+A2 --> A3 : EV6
+A3 : enter / trace("enter A3");
+A3 : exit / trace("exit A3");
+A3 : EV2 / trace("A3 handles EV2");
+A3 --> A1 : EV8
+X1 : enter / trace("enter X1");
+X1 : exit / trace("exit X1");
+X1 --> X2 : EV7
+X2 : enter / trace("enter X2");
+X2 : exit / trace("exit X2");
+X2 --> IDLE : LEAVE2
+Y1 : enter / trace("enter Y1");
+Y1 : exit / trace("exit Y1");
+Y1 : EV7 / trace("Y1 handles EV7");
+
+B1 : enter / trace("enter B1");
+B1 : exit / trace("exit B1");
+B1 : do / ticks = ticks + 1; trace("B1 do");
+B1 --> B2 : EV1
+
+B2 : enter / trace("enter B2");
+B2 : exit / trace("exit B2");
+B2 : LEAVE / trace("B2 handles LEAVE (only reached if region 1 did not leave PAR)");
+B2 --> B3 : EV4
+
+B2a : enter / trace("enter B2a");
+B2a : exit / trace("exit B2a");
+B2a --> B2b : EV3 [in_state(A2)]
+
+B2b : enter / trace("enter B2b");
+B2b : exit / trace("exit B2b");
+
+B3 : enter / trace("enter B3");
+B3 : exit / trace("exit B3");
+B3 --> B2[H] : EV5
+B2[H] --> B2a
+
+@enduml

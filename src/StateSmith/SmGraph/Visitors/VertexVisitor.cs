@@ -19,9 +19,10 @@ public class VertexVisitor : IVertexVisitor
         Visit((Vertex)v);
     }
 
+    /// <summary>A region (orthogonal state) is a kind of state, so visitors treat it as one unless they override this.</summary>
     public virtual void Visit(OrthoState v)
     {
-        Visit((Vertex)v);
+        Visit((State)v);
     }
     public virtual void Visit(StateMachine v)
     {

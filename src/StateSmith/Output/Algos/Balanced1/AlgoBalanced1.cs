@@ -54,8 +54,16 @@ public class AlgoBalanced1 : IGilAlgo
         this.gilCreationHelper = new GilCreationHelper();
     }
 
+    /// <summary>Orthogonal regions (EXPERIMENTAL) are only implemented by Balanced2.</summary>
+    protected virtual bool SupportsRegions => false;
+
     public string GenerateGil(StateMachine sm)
     {
+        if (!SupportsRegions && RegionHelper.AnyRegions(sm))
+        {
+            throw new System.ArgumentException($"Orthogonal regions are only supported by algorithm `{nameof(AlgorithmId.Balanced2)}`.");
+        }
+
         this._sm = sm;
         mangler.SetStateMachine(sm);
         eventHandlerBuilder.SetFile(this.file);

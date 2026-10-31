@@ -155,4 +155,22 @@ public class NameMangler
 
     public virtual string MangleVarName(string snakeCaseName) => snakeCaseName;
 
+    //------------------------------------------------------
+    // Orthogonal regions (EXPERIMENTAL)
+    //------------------------------------------------------
+
+    /// <summary>Active state of a region (ROOT while the region is inactive).</summary>
+    public virtual string SmRegionStateIdVarName(OrthoState region) => MangleVarName($"{SmStateName(region).ToLower()}_state_id");
+
+    /// <summary>Set when an orthogonal parent is exited, so its region dispatcher stops offering the event to more regions.</summary>
+    public virtual string SmRegionsExitedVarName(NamedVertex orthogonalParent) => MangleVarName($"{SmStateName(orthogonalParent).ToLower()}_exited");
+
+    /// <summary>Set by region handlers when an event falls off the top of a region without being consumed.</summary>
+    public virtual string SmRegionEventUnhandledVarName => MangleVarName("region_event_unhandled");
+
+    public virtual string SmRegionsDispatchFuncName(NamedVertex orthogonalParent) => SmTriggerHandlerFuncName(orthogonalParent, "dispatch_regions");
+    public virtual string SmRegionDispatchFuncName(OrthoState region) => SmTriggerHandlerFuncName(region, "dispatch");
+    public virtual string SmRegionEnterDefaultFuncName(OrthoState region) => SmTriggerHandlerFuncName(region, "enter_default");
+    public virtual string SmRegionExitUpToFuncName(OrthoState region) => SmTriggerHandlerFuncName(region, "exit_up_to");
+
 }

@@ -173,7 +173,21 @@ diagram_element:
         ignore
         |
         kept_block_comment
+        |
+        region_separator
     )
+    ;
+
+// EXPERIMENTAL (north-star branch). Separates concurrent (orthogonal) regions inside a composite state,
+// like PlantUML itself: `--` (stacked) or `||` (side by side).
+region_separator:
+    ohs
+    (
+        '-' '-'+
+        |
+        '|' '|'+
+    )
+    ohs
     ;
 
 // note left of Active : this is a short\nnote

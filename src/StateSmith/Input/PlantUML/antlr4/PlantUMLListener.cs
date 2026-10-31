@@ -201,6 +201,16 @@ public interface IPlantUMLListener : IParseTreeListener {
 	/// <param name="context">The parse tree.</param>
 	void ExitDiagram_element([NotNull] PlantUMLParser.Diagram_elementContext context);
 	/// <summary>
+	/// Enter a parse tree produced by <see cref="PlantUMLParser.region_separator"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	void EnterRegion_separator([NotNull] PlantUMLParser.Region_separatorContext context);
+	/// <summary>
+	/// Exit a parse tree produced by <see cref="PlantUMLParser.region_separator"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	void ExitRegion_separator([NotNull] PlantUMLParser.Region_separatorContext context);
+	/// <summary>
 	/// Enter a parse tree produced by <see cref="PlantUMLParser.note_short"/>.
 	/// </summary>
 	/// <param name="context">The parse tree.</param>

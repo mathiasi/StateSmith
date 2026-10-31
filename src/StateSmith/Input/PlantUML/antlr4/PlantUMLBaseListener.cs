@@ -240,6 +240,18 @@ public partial class PlantUMLBaseListener : IPlantUMLListener {
 	/// <param name="context">The parse tree.</param>
 	public virtual void ExitDiagram_element([NotNull] PlantUMLParser.Diagram_elementContext context) { }
 	/// <summary>
+	/// Enter a parse tree produced by <see cref="PlantUMLParser.region_separator"/>.
+	/// <para>The default implementation does nothing.</para>
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	public virtual void EnterRegion_separator([NotNull] PlantUMLParser.Region_separatorContext context) { }
+	/// <summary>
+	/// Exit a parse tree produced by <see cref="PlantUMLParser.region_separator"/>.
+	/// <para>The default implementation does nothing.</para>
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	public virtual void ExitRegion_separator([NotNull] PlantUMLParser.Region_separatorContext context) { }
+	/// <summary>
 	/// Enter a parse tree produced by <see cref="PlantUMLParser.note_short"/>.
 	/// <para>The default implementation does nothing.</para>
 	/// </summary>

@@ -134,6 +134,12 @@ public interface IPlantUMLVisitor<Result> : IParseTreeVisitor<Result> {
 	/// <return>The visitor result.</return>
 	Result VisitDiagram_element([NotNull] PlantUMLParser.Diagram_elementContext context);
 	/// <summary>
+	/// Visit a parse tree produced by <see cref="PlantUMLParser.region_separator"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	/// <return>The visitor result.</return>
+	Result VisitRegion_separator([NotNull] PlantUMLParser.Region_separatorContext context);
+	/// <summary>
 	/// Visit a parse tree produced by <see cref="PlantUMLParser.note_short"/>.
 	/// </summary>
 	/// <param name="context">The parse tree.</param>

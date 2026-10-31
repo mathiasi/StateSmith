@@ -86,5 +86,9 @@ public class StandardSmTransformer : SmTransformer
             StateNameValidator stateNameValidator = new();
             stateNameValidator.Visit(sm);
         }
+        if (RegionHelper.AnyRegions(sm))
+        {
+            sm.VisitRecursively(v => RegionValidator.ValidateTransitions(v)); // EXPERIMENTAL orthogonal regions
+        }
     }
 }

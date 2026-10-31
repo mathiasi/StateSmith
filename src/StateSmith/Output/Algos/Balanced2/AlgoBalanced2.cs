@@ -42,6 +42,8 @@ public class AlgoBalanced2 : AlgoBalanced1
         }
     }
 
+    protected override bool SupportsRegions => true;
+
     override protected string GetAlgoName()
     {
         return nameof(AlgorithmId.Balanced2);
@@ -49,8 +51,31 @@ public class AlgoBalanced2 : AlgoBalanced1
 
     override protected void OutputAlgoBalanced1StructPointers()
     {
-        // do nothing
+        if (!RegionHelper.AnyRegions(Sm))
+            return;
+
+        // EXPERIMENTAL orthogonal regions
+        file.AppendIndentedLine();
+        file.AppendIndentedLine("// Active state of each orthogonal region (ROOT while the region is inactive). Feel free to inspect, but don't modify.");
+        foreach (var region in OrderedRegions())
+        {
+            file.AppendIndentedLine($"public {mangler.SmStateEnumType} {mangler.SmRegionStateIdVarName(region)} = {mangler.SmQualifiedStateEnumValue(Sm)};");
+        }
+
+        file.AppendIndentedLine();
+        file.AppendIndentedLine("// Used internally by the region dispatchers. Don't modify.");
+        file.AppendIndentedLine($"private bool {mangler.SmRegionEventUnhandledVarName};");
+        foreach (var parent in OrthogonalParents())
+        {
+            file.AppendIndentedLine($"private bool {mangler.SmRegionsExitedVarName(parent)};");
+        }
     }
+
+    private List<OrthoState> OrderedRegions() => Sm.GetOrderedNamedVerticesCopy().OfType<OrthoState>().ToList();
+    private List<NamedVertex> OrthogonalParents() => Sm.GetOrderedNamedVerticesCopy().Where(v => v.HasRegions()).ToList();
+
+    /// <summary>States whose scope is <paramref name="scope"/> (null: the root scope). Regions are in their own scope.</summary>
+    private IEnumerable<NamedVertex> StatesInScope(OrthoState? scope) => Sm.GetOrderedNamedVerticesCopy().Where(v => v.Scope() == scope);
 
     override protected void OutputExitUpToFunction()
     {
@@ -70,7 +95,7 @@ public class AlgoBalanced2 : AlgoBalanced1
             {
                 string SEP = settings.allowSingleLineSwitchCase ? " " : "\n" + file.GetIndent();
 
-                foreach (var namedVertex in Sm.GetOrderedNamedVerticesCopy())
+                foreach (var namedVertex in StatesInScope(null))
                 {
                     if (namedVertex is StateMachine)
                     {
@@ -100,6 +125,127 @@ public class AlgoBalanced2 : AlgoBalanced1
 
         file.FinishCodeBlock(forceNewLine: true);
         file.AppendIndentedLine();
+
+        if (RegionHelper.AnyRegions(Sm))
+        {
+            OutputRegionFunctions();
+        }
+    }
+
+    //------------------------------------------------------------------------------------------
+    // Orthogonal regions (EXPERIMENTAL). See RegionHelper for the model and terms.
+    //------------------------------------------------------------------------------------------
+
+    private void OutputRegionFunctions()
+    {
+        string eventIdParameterName = mangler.MangleVarName("event_id");
+        string SEP = settings.allowSingleLineSwitchCase ? " " : "\n" + file.GetIndent();
+
+        foreach (var region in OrderedRegions())
+        {
+            string regionVar = mangler.SmRegionStateIdVarName(region);
+
+            // exit up to (within the region)
+            file.AppendIndentedLine($"// Exits states in region `{region.Name}` until `desired_state` is active. ROOT exits the whole region.");
+            string desired_state = mangler.MangleVarName("desired_state");
+            file.AppendIndented($"private void {mangler.SmRegionExitUpToFuncName(region)}({mangler.SmStateEnumType} {desired_state})");
+            file.StartCodeBlock();
+            file.AppendIndented($"while (this.{regionVar} != {desired_state})");
+            file.StartCodeBlock();
+            file.AppendIndented($"switch (this.{regionVar})");
+            file.StartCodeBlock();
+            foreach (var v in StatesInScope(region))
+            {
+                file.AppendIndented();
+                file.AppendIndentNewlines($"case {mangler.SmQualifiedStateEnumValue(v)}:{SEP}");
+                file.AppendIndentNewlines($"this.{mangler.SmTriggerHandlerFuncName(v, TriggerHelper.TRIGGER_EXIT)}();{SEP}");
+                file.AppendIndentNewlines("break;\n");
+                verticesThatNeedExitStateIdAdjustment.Add(v);
+            }
+            file.AppendIndented();
+            file.AppendIndentNewlines($"default:{SEP}return;  // Just to be safe. Prevents infinite loop if state ID memory is somehow corrupted.");
+            file.AppendWithoutIndent("\n");
+            file.FinishCodeBlock(forceNewLine: true);
+            file.FinishCodeBlock(forceNewLine: true);
+            file.FinishCodeBlock(forceNewLine: true);
+            file.AppendIndentedLine();
+
+            // default entry: enter the region, then follow its initial transition
+            file.AppendIndentedLine($"// Enters region `{region.Name}` through its initial state.");
+            file.AppendIndented($"private void {mangler.SmRegionEnterDefaultFuncName(region)}()");
+            file.StartCodeBlock();
+            file.AppendIndentedLine($"this.{mangler.SmTriggerHandlerFuncName(region, TriggerHelper.TRIGGER_ENTER)}();");
+            var initialState = region.Children.OfType<InitialState>().Single();
+            eventHandlerBuilder.OutputTransitionCode(new Behavior(region, initialState), noAncestorHandlesEvent: true, checkForExiting: false);
+            file.FinishCodeBlock(forceNewLine: true);
+            file.AppendIndentedLine();
+
+            // dispatch: returns true if the region consumed the event
+            file.AppendIndentedLine($"// Offers an event to region `{region.Name}`. Returns true if the region consumed it.");
+            file.AppendIndented($"private bool {mangler.SmRegionDispatchFuncName(region)}({mangler.SmEventEnumType} {eventIdParameterName})");
+            file.StartCodeBlock();
+            file.AppendIndentedLine($"this.{mangler.SmRegionEventUnhandledVarName} = false;");
+            file.AppendIndented($"switch (this.{regionVar})");
+            file.StartCodeBlock();
+            foreach (var v in StatesInScope(region).Where(v => v != region))
+            {
+                file.AppendIndentedLine($"// STATE: {v.Name}");
+                file.AppendIndentedLine($"case {mangler.SmQualifiedStateEnumValue(v)}:");
+                file.IncreaseIndentLevel();
+                if (v.HasRegions())
+                {
+                    file.AppendIndentedLine($"this.{mangler.SmRegionsDispatchFuncName(v)}({eventIdParameterName});");
+                }
+                else
+                {
+                    OutputStateEventHandlerCode(v, eventIdParameterName, unhandledStatement: $"this.{mangler.SmRegionEventUnhandledVarName} = true;");
+                }
+                file.AppendIndentedLine("break;");
+                file.DecreaseIndentLevel();
+                file.AppendIndentedLine();
+            }
+            file.AppendIndentedLine($"default: this.{mangler.SmRegionEventUnhandledVarName} = true; break;");
+            file.FinishCodeBlock(forceNewLine: true);
+            file.AppendIndentedLine($"return !this.{mangler.SmRegionEventUnhandledVarName};");
+            file.FinishCodeBlock(forceNewLine: true);
+            file.AppendIndentedLine();
+        }
+
+        foreach (var parent in OrthogonalParents())
+        {
+            string exitedVar = mangler.SmRegionsExitedVarName(parent);
+            bool parentInRegion = parent.ContainingRegion() != null;
+
+            file.AppendIndentedLine($"// Dispatches an event to the regions of `{parent.Name}` (in region order). The event goes to `{parent.Name}`");
+            file.AppendIndentedLine($"// and its ancestors only if no region consumed it. Stops early if a region's transition left `{parent.Name}`.");
+            file.AppendIndented($"private void {mangler.SmRegionsDispatchFuncName(parent)}({mangler.SmEventEnumType} {eventIdParameterName})");
+            file.StartCodeBlock();
+            file.AppendIndentedLine("bool consumed = false;");
+            file.AppendIndentedLine($"this.{exitedVar} = false;");
+            foreach (var region in parent.Regions())
+            {
+                file.AppendIndentedLine();
+                file.AppendIndented($"if (this.{mangler.SmRegionDispatchFuncName(region)}({eventIdParameterName}))");
+                file.StartCodeBlock();
+                file.AppendIndentedLine("consumed = true;");
+                file.FinishCodeBlock(forceNewLine: true);
+                file.AppendIndented($"if (this.{exitedVar})");
+                file.StartCodeBlock();
+                file.AppendIndentedLine("return;");
+                file.FinishCodeBlock(forceNewLine: true);
+            }
+            file.AppendIndentedLine();
+            file.AppendIndentedLine($"this.{mangler.SmRegionEventUnhandledVarName} = false;");
+            file.AppendIndented("if (consumed)");
+            file.StartCodeBlock();
+            file.AppendIndentedLine("return;");
+            file.FinishCodeBlock(forceNewLine: true);
+            file.AppendIndentedLine();
+            file.AppendIndentedLine($"// No region consumed the event: `{parent.Name}` and its ancestors get it.");
+            OutputStateEventHandlerCode(parent, eventIdParameterName, unhandledStatement: parentInRegion ? $"this.{mangler.SmRegionEventUnhandledVarName} = true;" : null);
+            file.FinishCodeBlock(forceNewLine: true);
+            file.AppendIndentedLine();
+        }
     }
 
     override protected void OutputFuncDispatchEvent()
@@ -122,7 +268,7 @@ public class AlgoBalanced2 : AlgoBalanced1
             file.StartCodeBlock();
             {
                 bool needsLineSpacer = false;
-                foreach (var namedVertex in Sm.GetOrderedNamedVerticesCopy())
+                foreach (var namedVertex in StatesInScope(null))
                 {
                     if (needsLineSpacer)
                     {
@@ -134,7 +280,14 @@ public class AlgoBalanced2 : AlgoBalanced1
                     file.AppendIndentedLine($"case {mangler.SmQualifiedStateEnumValue(namedVertex)}:");
 
                     file.IncreaseIndentLevel();
-                    OutputStateEventHandlerCode(namedVertex, eventIdParameterName);
+                    if (namedVertex.HasRegions())
+                    {
+                        file.AppendIndentedLine($"this.{mangler.SmRegionsDispatchFuncName(namedVertex)}({eventIdParameterName});");
+                    }
+                    else
+                    {
+                        OutputStateEventHandlerCode(namedVertex, eventIdParameterName);
+                    }
                     file.AppendIndentedLine("break;");
                     file.DecreaseIndentLevel();
                 }
@@ -165,7 +318,8 @@ public class AlgoBalanced2 : AlgoBalanced1
         return true;
     }
 
-    private void OutputStateEventHandlerCode(NamedVertex namedVertex, string eventIdParameterName)
+    /// <param name="unhandledStatement">Regions only: code that reports "not consumed here" for events without a handler in this scope.</param>
+    private void OutputStateEventHandlerCode(NamedVertex namedVertex, string eventIdParameterName, string? unhandledStatement = null)
     {
         var allEvents = Sm.GetEventSet();
 
@@ -175,7 +329,7 @@ public class AlgoBalanced2 : AlgoBalanced1
         // optimization for when a switch is not required (single event)
         if (allEvents.Count == 1)
         {
-            OutputStateSingleEventHandlerCode(namedVertex, allEvents, stateEvents);
+            OutputStateSingleEventHandlerCode(namedVertex, allEvents, stateEvents, unhandledStatement);
         }
         else
         {
@@ -186,6 +340,8 @@ public class AlgoBalanced2 : AlgoBalanced1
             if (IsStateEventHandlerEmpty(namedVertex, stateEvents, otherEvents))
             {
                 file.AppendIndentedLine($"// No events handled by this state (or its ancestors).");
+                if (unhandledStatement != null)
+                    file.AppendIndentedLine(unhandledStatement);
             }
             else
             {
@@ -215,7 +371,11 @@ public class AlgoBalanced2 : AlgoBalanced1
                         }
                     }
 
-                    if (settings.outputSwitchDefault)
+                    if (unhandledStatement != null)
+                    {
+                        file.AppendIndentedLine($"default: {unhandledStatement} break;");
+                    }
+                    else if (settings.outputSwitchDefault)
                     {
                         file.AppendIndentedLine();
                         file.AppendIndentedLine($"default: break; // to avoid \"unused enumeration value in switch\" warning");
@@ -231,7 +391,7 @@ public class AlgoBalanced2 : AlgoBalanced1
     /// https://github.com/StateSmith/StateSmith/issues/388
     /// </summary>
     /// <exception cref="Exception"></exception>
-    private void OutputStateSingleEventHandlerCode(NamedVertex namedVertex, IReadOnlySet<string> allEvents, HashSet<string> stateEvents)
+    private void OutputStateSingleEventHandlerCode(NamedVertex namedVertex, IReadOnlySet<string> allEvents, HashSet<string> stateEvents, string? unhandledStatement = null)
     {
         string onlyEvent = allEvents.Single();
         if (stateEvents.Count > 1)
@@ -259,6 +419,8 @@ public class AlgoBalanced2 : AlgoBalanced1
 
         if (!outputHandler)
         {
+            if (unhandledStatement != null)
+                file.AppendWithoutIndent(unhandledStatement + " ");
             file.AppendWithoutIndent($"// state and ancestors have no handler for `{onlyEvent}` event.");
         }
 

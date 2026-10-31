@@ -1,0 +1,287 @@
+### GO EV2 EV1 EV2 DO EV3 EV4 EV5 LEAVE
+start
+  enter IDLE
+  = IDLE | ROOT | ROOT | ROOT ROOT | ticks=0
+GO
+  exit IDLE
+  enter PAR
+  enter A1
+  enter B1
+  = PAR | A1 | B1 | ROOT ROOT | ticks=0
+EV2
+  PAR handles EV2
+  = PAR | A1 | B1 | ROOT ROOT | ticks=0
+EV1
+  exit A1
+  enter A2
+  exit B1
+  enter B2
+  enter B2a
+  = PAR | A2 | B2A | ROOT ROOT | ticks=0
+EV2
+  A2 handles EV2
+  = PAR | A2 | B2A | ROOT ROOT | ticks=0
+DO
+  PAR do
+  = PAR | A2 | B2A | ROOT ROOT | ticks=0
+EV3
+  exit B2a
+  enter B2b
+  = PAR | A2 | B2B | ROOT ROOT | ticks=0
+EV4
+  exit B2b
+  exit B2
+  enter B3
+  = PAR | A2 | B3 | ROOT ROOT | ticks=0
+EV5
+  exit B3
+  enter B2
+  enter B2b
+  = PAR | A2 | B2B | ROOT ROOT | ticks=0
+LEAVE
+  exit B2b
+  exit B2
+  exit A2
+  exit PAR
+  enter IDLE
+  = IDLE | ROOT | ROOT | ROOT ROOT | ticks=0
+### DEEP EV1 DO EV2 RESET
+start
+  enter IDLE
+  = IDLE | ROOT | ROOT | ROOT ROOT | ticks=0
+DEEP
+  exit IDLE
+  enter PAR
+  enter A1
+  enter B2
+  enter B2b
+  = PAR | A1 | B2B | ROOT ROOT | ticks=0
+EV1
+  exit A1
+  enter A2
+  = PAR | A2 | B2B | ROOT ROOT | ticks=0
+DO
+  PAR do
+  = PAR | A2 | B2B | ROOT ROOT | ticks=0
+EV2
+  A2 handles EV2
+  = PAR | A2 | B2B | ROOT ROOT | ticks=0
+RESET
+  exit B2b
+  exit B2
+  exit A2
+  exit PAR
+  PAR RESET
+  enter IDLE
+  = IDLE | ROOT | ROOT | ROOT ROOT | ticks=0
+### GO DO DO EV3 EV1 EV3 GO RESET
+start
+  enter IDLE
+  = IDLE | ROOT | ROOT | ROOT ROOT | ticks=0
+GO
+  exit IDLE
+  enter PAR
+  enter A1
+  enter B1
+  = PAR | A1 | B1 | ROOT ROOT | ticks=0
+DO
+  B1 do
+  PAR do
+  = PAR | A1 | B1 | ROOT ROOT | ticks=1
+DO
+  B1 do
+  PAR do
+  = PAR | A1 | B1 | ROOT ROOT | ticks=2
+EV3
+  = PAR | A1 | B1 | ROOT ROOT | ticks=2
+EV1
+  exit A1
+  enter A2
+  exit B1
+  enter B2
+  enter B2a
+  = PAR | A2 | B2A | ROOT ROOT | ticks=2
+EV3
+  exit B2a
+  enter B2b
+  = PAR | A2 | B2B | ROOT ROOT | ticks=2
+GO
+  = PAR | A2 | B2B | ROOT ROOT | ticks=2
+RESET
+  exit B2b
+  exit B2
+  exit A2
+  exit PAR
+  PAR RESET
+  enter IDLE
+  = IDLE | ROOT | ROOT | ROOT ROOT | ticks=2
+### DEEP EV4 EV5 EV1 LEAVE GO
+start
+  enter IDLE
+  = IDLE | ROOT | ROOT | ROOT ROOT | ticks=0
+DEEP
+  exit IDLE
+  enter PAR
+  enter A1
+  enter B2
+  enter B2b
+  = PAR | A1 | B2B | ROOT ROOT | ticks=0
+EV4
+  exit B2b
+  exit B2
+  enter B3
+  = PAR | A1 | B3 | ROOT ROOT | ticks=0
+EV5
+  exit B3
+  enter B2
+  enter B2b
+  = PAR | A1 | B2B | ROOT ROOT | ticks=0
+EV1
+  exit A1
+  enter A2
+  = PAR | A2 | B2B | ROOT ROOT | ticks=0
+LEAVE
+  exit B2b
+  exit B2
+  exit A2
+  exit PAR
+  enter IDLE
+  = IDLE | ROOT | ROOT | ROOT ROOT | ticks=0
+GO
+  exit IDLE
+  enter PAR
+  enter A1
+  enter B1
+  = PAR | A1 | B1 | ROOT ROOT | ticks=0
+### GO EV1 EV6 EV2 EV7 DO EV2 LEAVE2
+start
+  enter IDLE
+  = IDLE | ROOT | ROOT | ROOT ROOT | ticks=0
+GO
+  exit IDLE
+  enter PAR
+  enter A1
+  enter B1
+  = PAR | A1 | B1 | ROOT ROOT | ticks=0
+EV1
+  exit A1
+  enter A2
+  exit B1
+  enter B2
+  enter B2a
+  = PAR | A2 | B2A | ROOT ROOT | ticks=0
+EV6
+  exit A2
+  enter A3
+  enter X1
+  enter Y1
+  = PAR | A3 | B2A | X1 Y1 | ticks=0
+EV2
+  A3 handles EV2
+  = PAR | A3 | B2A | X1 Y1 | ticks=0
+EV7
+  exit X1
+  enter X2
+  Y1 handles EV7
+  = PAR | A3 | B2A | X2 Y1 | ticks=0
+DO
+  PAR do
+  = PAR | A3 | B2A | X2 Y1 | ticks=0
+EV2
+  A3 handles EV2
+  = PAR | A3 | B2A | X2 Y1 | ticks=0
+LEAVE2
+  exit B2a
+  exit B2
+  exit Y1
+  exit X2
+  exit A3
+  exit PAR
+  enter IDLE
+  = IDLE | ROOT | ROOT | ROOT ROOT | ticks=0
+### GO EV1 EV6 EV8 EV1 EV6 EV7 RESET
+start
+  enter IDLE
+  = IDLE | ROOT | ROOT | ROOT ROOT | ticks=0
+GO
+  exit IDLE
+  enter PAR
+  enter A1
+  enter B1
+  = PAR | A1 | B1 | ROOT ROOT | ticks=0
+EV1
+  exit A1
+  enter A2
+  exit B1
+  enter B2
+  enter B2a
+  = PAR | A2 | B2A | ROOT ROOT | ticks=0
+EV6
+  exit A2
+  enter A3
+  enter X1
+  enter Y1
+  = PAR | A3 | B2A | X1 Y1 | ticks=0
+EV8
+  exit Y1
+  exit X1
+  exit A3
+  enter A1
+  = PAR | A1 | B2A | ROOT ROOT | ticks=0
+EV1
+  exit A1
+  enter A2
+  = PAR | A2 | B2A | ROOT ROOT | ticks=0
+EV6
+  exit A2
+  enter A3
+  enter X1
+  enter Y1
+  = PAR | A3 | B2A | X1 Y1 | ticks=0
+EV7
+  exit X1
+  enter X2
+  Y1 handles EV7
+  = PAR | A3 | B2A | X2 Y1 | ticks=0
+RESET
+  exit B2a
+  exit B2
+  exit Y1
+  exit X2
+  exit A3
+  exit PAR
+  PAR RESET
+  enter IDLE
+  = IDLE | ROOT | ROOT | ROOT ROOT | ticks=0
+### GO EV1 EV6 EV3 EV1 EV6 LEAVE
+start
+  enter IDLE
+  = IDLE | ROOT | ROOT | ROOT ROOT | ticks=0
+GO
+  exit IDLE
+  enter PAR
+  enter A1
+  enter B1
+  = PAR | A1 | B1 | ROOT ROOT | ticks=0
+EV1
+  exit A1
+  enter A2
+  exit B1
+  enter B2
+  enter B2a
+  = PAR | A2 | B2A | ROOT ROOT | ticks=0
+EV6
+  exit A2
+  enter A3
+  enter X1
+  enter Y1
+  = PAR | A3 | B2A | X1 Y1 | ticks=0
+EV3
+  = PAR | A3 | B2A | X1 Y1 | ticks=0
+EV1
+  = PAR | A3 | B2A | X1 Y1 | ticks=0
+EV6
+  = PAR | A3 | B2A | X1 Y1 | ticks=0
+LEAVE
+  B2 handles LEAVE (only reached if region 1 did not leave PAR)
+  = PAR | A3 | B2A | X1 Y1 | ticks=0

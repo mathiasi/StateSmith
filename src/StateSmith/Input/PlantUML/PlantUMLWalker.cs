@@ -5,6 +5,7 @@ using Antlr4.Runtime.Misc;
 using StateSmith.Common;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -85,6 +86,73 @@ public class PlantUMLWalker : PlantUMLBaseListener
     public override void ExitState_explicit([NotNull] PlantUMLParser.State_explicitContext context)
     {
         nodeStack.Pop();
+    }
+
+    //--------------------------------------------------------------------------------------------
+    // EXPERIMENTAL (north-star branch): orthogonal regions, written like PlantUML's concurrent states:
+    //      state BOILERS {
+    //          [*] --> BREW_COLD
+    //          ...
+    //          --
+    //          [*] --> STEAM_OFF
+    //          ...
+    //      }
+    // Each section becomes a region node `$ORTHO n : {STATE}_REGION_n`.
+    //--------------------------------------------------------------------------------------------
+
+    private readonly Dictionary<DiagramNode, List<DiagramNode>> regionsOfNode = new();
+    private readonly Dictionary<DiagramNode, DiagramNode> regionParent = new();
+
+    public override void EnterRegion_separator([NotNull] PlantUMLParser.Region_separatorContext context)
+    {
+        var current = CurrentEnclosingNode;
+
+        if (!regionParent.TryGetValue(current, out var parent))
+        {
+            parent = current;
+            if (parent == root)
+            {
+                ThrowValidationFailure("A region separator (`--` or `||`) must be inside a composite state: `state NAME { ... -- ... }`.", context);
+            }
+
+            // first separator: everything declared so far becomes region 1
+            regionsOfNode[parent] = new List<DiagramNode>();
+            var region1 = AddRegionNode(parent);
+            foreach (var child in parent.children.ToList())
+            {
+                if (child == region1)
+                    continue;
+                parent.children.Remove(child);
+                LinkParentChildNodes(region1, child);
+            }
+
+            if (nodeInitialStateMap.TryGetValue(parent, out var initial))
+            {
+                nodeInitialStateMap.Remove(parent);
+                nodeInitialStateMap.Add(region1, initial);
+            }
+        }
+
+        var next = AddRegionNode(parent);
+        nodeStack.Pop(); // the composite state, or the previous region
+        nodeStack.Push(next);
+    }
+
+    private DiagramNode AddRegionNode(DiagramNode parent)
+    {
+        var regions = regionsOfNode[parent];
+        int n = regions.Count + 1;
+        string id = $"{parent.id}_REGION_{n}";
+        DiagramNode region = new()
+        {
+            id = id,
+            label = $"$ORTHO {n} : {id}",
+        };
+        nodeMap.Add(id, region);
+        LinkParentChildNodes(parent, region);
+        regions.Add(region);
+        regionParent[region] = parent;
+        return region;
     }
 
     private DiagramNode GetOrAddHistoryState(PlantUMLParser.History_stateContext historyStateContext, DiagramNode parentNode)

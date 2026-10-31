@@ -24,10 +24,12 @@ public class WrappingExpander
     private static readonly Regex codeTypeSplittingRegex = new($@"<(?<type>{XML_FINAL_CODE_TAG_NAME}|{XML_GIL_CODE_TAG_NAME})>(?<value>[\s\S]*?){XML_END_CODE_TAG}"); // MUST be lazy match to prevent skipping over multiple matches
     private readonly UserExpansionScriptBases userExpansionScriptBases;
     private readonly RenderConfigPortableVars? portable;
+    private readonly StateSmith.Output.Algos.Balanced1.NameMangler? mangler;
 
-    public WrappingExpander(IExpander expander, UserExpansionScriptBases userExpansionScriptBases, RenderConfigPortableVars? portable = null)
+    public WrappingExpander(IExpander expander, UserExpansionScriptBases userExpansionScriptBases, RenderConfigPortableVars? portable = null, StateSmith.Output.Algos.Balanced1.NameMangler? mangler = null)
     {
         this.portable = portable;
+        this.mangler = mangler;
         this.expander = expander;
         this.userExpansionScriptBases = userExpansionScriptBases;
     }
@@ -68,6 +70,9 @@ public class WrappingExpander
 
     protected string ExpandWrapCode(string code, bool isGuard, Behavior behavior)
     {
+        if (mangler != null)
+            code = RegionHelper.RewriteInState(code, behavior.OwningVertex, mangler); // `in_state(X)` (EXPERIMENTAL regions)
+
         if (portable?.IsEnabled == true)
         {
             code = PortableTimeProcessor.Rewrite(code, behavior, portable); // `after()`, `elapsed()`

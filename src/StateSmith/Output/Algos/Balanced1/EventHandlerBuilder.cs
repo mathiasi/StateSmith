@@ -32,7 +32,7 @@ public class EventHandlerBuilder
     {
         this.pseudoStateHandlerBuilder = pseudoStateHandlerBuilder;
         this.mangler = mangler;
-        this.wrappingExpander = new(expander, userExpansionScriptBases, portable);
+        this.wrappingExpander = new(expander, userExpansionScriptBases, portable, mangler);
         this.userExpansionScriptBases = userExpansionScriptBases;
         this.settings = settings;
     }
@@ -218,6 +218,10 @@ public class EventHandlerBuilder
             {
                 var enterHandler = mangler.SmTriggerHandlerFuncName(namedVertexToEnter, TriggerHelper.TRIGGER_ENTER);
                 File.AppendIndentedLine($"this.{enterHandler}();");
+
+                int index = transitionPath.toEnter.IndexOf(stateToEnter);
+                Vertex? next = index + 1 < transitionPath.toEnter.Count ? transitionPath.toEnter[index + 1] : null;
+                OnStateEnteredDuringTransition(namedVertexToEnter, next);
             }
             else if (stateToEnter is PseudoStateVertex pv)
             {
@@ -229,6 +233,15 @@ public class EventHandlerBuilder
             }
         }
         File.RequestNewLineBeforeMoreCode();
+    }
+
+    /// <summary>
+    /// Called after a state's enter function call is written on a transition path. <paramref name="next"/> is the next
+    /// vertex on the path, or null when <paramref name="entered"/> is the transition target.
+    /// </summary>
+    virtual protected void OnStateEnteredDuringTransition(NamedVertex entered, Vertex? next)
+    {
+        // do nothing. override in derived class.
     }
 
     private void OutputStartOfBehaviorCode(Behavior behavior)
@@ -614,6 +627,7 @@ public class EventHandlerBuilder
 
         File.StartCodeBlock();
         {
+            OutputFuncStateExit_PreBehaviors(state);
             OutputStateBehaviorsForTrigger(state, TriggerHelper.TRIGGER_EXIT);
 
             if (state.Parent == null)
@@ -634,6 +648,12 @@ public class EventHandlerBuilder
     }
 
     virtual protected void OutputExitFunctionEndCode(NamedVertex state)
+    {
+        // do nothing. override in derived class.
+    }
+
+    /// <summary>Called at the start of a state's exit function, before its exit behaviors.</summary>
+    virtual protected void OutputFuncStateExit_PreBehaviors(NamedVertex state)
     {
         // do nothing. override in derived class.
     }

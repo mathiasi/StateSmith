@@ -38,7 +38,8 @@ public class SpecificVertexValidator : VertexVisitor
 
     public override void Visit(OrthoState v)
     {
-        throw new System.NotImplementedException();
+        RegionValidator.ValidateRegion(v);
+        VisitChildren(v);
     }
 
     public override void Visit(StateMachine v)
