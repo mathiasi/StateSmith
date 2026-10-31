@@ -1,0 +1,19 @@
+[package]
+name = "manetta-nostd"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Builds the generated `manetta_sm.rs` (shared with ../rust via #[path]) as a no_std, allocator-free static library.
+#   cargo build --release --target riscv32imc-unknown-none-elf
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"

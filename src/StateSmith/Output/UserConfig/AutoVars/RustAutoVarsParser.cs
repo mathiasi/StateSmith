@@ -13,7 +13,10 @@ public class RustAutoVarsParser : IAutoVarsParser
 {
     public List<string> ParseIdentifiers(string code)
     {
-        code = StringUtils.RemoveCCodeComments(code);
+        // Strip comments without joining lines (StringUtils.RemoveCCodeComments eats the newline after a `//` comment,
+        // which would hide the next declaration from the `^` anchored regex below).
+        code = Regex.Replace(code, @"/\*[\s\S]*?\*/", " ");
+        code = Regex.Replace(code, @"//[^\r\n]*", "");
 
         var regex = new Regex(@"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?(?<identifier>[_a-zA-Z]\w*)\s*:");
         return regex.Matches(code).Cast<Match>().Select(m => m.Groups["identifier"].Value).ToList();

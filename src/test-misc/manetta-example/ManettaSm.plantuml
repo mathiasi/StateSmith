@@ -1,0 +1,144 @@
+@startuml ManettaSm
+
+' Rendering only. Left-to-right keeps the many IDLE <-> BREWING / STEAM edges readable.
+' StateSmith's PlantUML grammar doesn't know `left to right direction`, so it is wrapped in an ignore block.
+' <StateSmith:ignore>
+left to right direction
+' </StateSmith:ignore>
+skinparam defaultFontSize 13
+
+' Cut-down Manetta espresso machine controller (device side).
+'
+' ONE diagram text generates both Rust (board, no_std) and TypeScript (iPad app).
+' Rules that make that work:
+'   - plain assignments / comparisons on variables (`pump_on = true;`, `cmd_max_ms == 0`).
+'     Every variable is an auto-expanded var, so `now_ms` becomes `self.vars.now_ms` (Rust)
+'     or `this.vars.now_ms` (TS).
+'   - enum outputs are set and tested through helper expansions:
+'     `set_reply(OK)`, `power_is(READY)`, `started_by(APP)`.
+'   - time is `elapsed(t)` = now_ms - t (wrapping u32 in both languages), `minutes(n)` = n * 60000.
+'   - the host sets `now_ms` and dispatches `do` every 100 ms tick, and sets
+'     `last_write_at = now_ms` on every BLE write (any write is a heartbeat).
+'   - command arguments (`cmd_max_ms`) are written to vars before the command event is dispatched.
+'
+' Parallel concerns are NOT regions (StateSmith has none). They are variables + guards:
+'   temperature  -> `power` (HEATING / READY / COOLING), updated by TEMP_* events in ON
+'   auto-off     -> `auto_off_from` timestamp + `do` guard
+'   faults       -> FAULT state (the one exception: a fault really does stop everything)
+
+' ////////////////////////////// STATES //////////////////////////////
+
+state MANETTA {
+    [*] --> OFF
+    state OFF
+    state ON {
+        [*] --> IDLE
+        state IDLE
+        state BREWING
+        state STEAM {
+            [*] --> STEAM_HEATING
+            state STEAM_HEATING
+            state STEAM_READY
+        }
+    }
+    state FAULT
+    state AFTER_FAULT <<choice>>
+}
+
+[*] --> MANETTA
+
+' ////////////////// MANETTA: true in every state unless a child overrides it //////////////////
+' (PlantUML input can't attach behaviors to the state machine root, hence this outer state.)
+
+MANETTA : PING / set_reply(OK);
+MANETTA : STOP_BREW / set_reply(OK);
+MANETTA : LEAVE_STEAM / set_reply(OK);
+MANETTA --> FAULT : FAULT_DETECTED
+
+' ////////////////////////////// OFF //////////////////////////////
+
+OFF : enter / power_relay_on = false; set_power(OFF);
+OFF : TURN_OFF / set_reply(OK);
+OFF : (START_BREW, ENTER_STEAM) / set_reply(NOT_READY);
+OFF --> ON : TURN_ON / set_reply(OK);
+OFF --> ON : MACHINE_POWER_SWITCH
+
+' ////////////////////////////// ON //////////////////////////////
+' Default answers while on. Children override them.
+
+ON : enter / power_relay_on = true; set_power(HEATING); auto_off_from = now_ms;
+ON : TURN_ON / set_reply(OK); auto_off_from = now_ms;
+ON : (START_BREW, ENTER_STEAM) / set_reply(BUSY);
+ON : TEMP_HEATING / set_power(HEATING);
+ON : TEMP_READY / set_power(READY);
+ON : TEMP_TOO_HOT / set_power(COOLING);
+ON --> OFF : TURN_OFF / set_reply(OK);
+ON --> OFF : MACHINE_POWER_SWITCH
+
+
+' ////////////////////////////// IDLE //////////////////////////////
+' Brewing needs READY. Heating and cooling (after steam) both answer NOT_READY.
+' Steam is allowed while READY or COOLING, not while still HEATING after turn-on.
+
+IDLE : 1. START_BREW [cmd_max_ms == 0] / set_reply(INVALID);
+IDLE : 2. START_BREW [cmd_max_ms != 0 && !power_is(READY)] / set_reply(NOT_READY);
+IDLE --> BREWING : 3. START_BREW [cmd_max_ms != 0 && power_is(READY)] / set_reply(OK); set_start_source(APP); brew_cmd_max_ms = cmd_max_ms;
+IDLE --> BREWING : MACHINE_BREW_SWITCH_ON / set_start_source(MACHINE);
+
+IDLE : 1. ENTER_STEAM [cmd_max_ms == 0] / set_reply(INVALID);
+IDLE : 2. ENTER_STEAM [cmd_max_ms != 0 && power_is(HEATING)] / set_reply(NOT_READY);
+IDLE --> STEAM : 3. ENTER_STEAM [cmd_max_ms != 0 && !power_is(HEATING)] / set_reply(OK); steam_cmd_max_ms = cmd_max_ms;
+IDLE --> STEAM : MACHINE_STEAM_BUTTON [!power_is(HEATING)] / steam_cmd_max_ms = device_max_steam_ms;
+
+IDLE --> OFF : do [elapsed(auto_off_from) >= minutes(auto_off_min)]
+
+' ////////////////////////////// BREWING //////////////////////////////
+
+BREWING : enter / set_phase(BREWING); set_stop_reason(NONE); pump_on = true; brew_started_at = now_ms;
+BREWING : exit / pump_on = false; set_phase(IDLE); auto_off_from = now_ms;
+BREWING : TURN_OFF / set_reply(BUSY);
+
+BREWING --> IDLE : 1. do [started_by(APP) && elapsed(brew_started_at) >= brew_cmd_max_ms] / set_stop_reason(COMMAND_CAP);
+BREWING --> IDLE : 2. do [elapsed(brew_started_at) >= device_max_brew_ms] / set_stop_reason(DEVICE_CAP);
+BREWING --> IDLE : 3. do [started_by(APP) && elapsed(last_write_at) >= heartbeat_timeout_ms] / set_stop_reason(HEARTBEAT);
+BREWING --> IDLE : STOP_BREW / set_reply(OK); set_stop_reason(APP);
+BREWING --> IDLE : MACHINE_BREW_SWITCH_OFF / set_stop_reason(MACHINE);
+BREWING --> IDLE : LINK_LOST [started_by(APP)] / set_stop_reason(LINK_LOST);
+BREWING --> OFF : MACHINE_POWER_SWITCH / set_stop_reason(MACHINE);
+BREWING --> FAULT : FAULT_DETECTED / set_stop_reason(FAULT);
+
+' ////////////////////////////// STEAM //////////////////////////////
+' Single heater: while steaming the boiler is "ON" (steam temperature), so the
+' brew temperature events are ignored. Leaving steam means the boiler must cool.
+' LINK_LOST is deliberately not handled: steam survives a lost link.
+
+STEAM : enter / steam_on = true; set_power(ON); steam_started_at = now_ms; steam_cmd_at = now_ms;
+STEAM : exit / steam_on = false; set_steam_state(OFF); set_power(COOLING);
+STEAM : (TEMP_HEATING, TEMP_READY, TEMP_TOO_HOT)
+STEAM : 1. ENTER_STEAM [cmd_max_ms == 0] / set_reply(INVALID);
+STEAM : 2. ENTER_STEAM [cmd_max_ms != 0] / set_reply(OK); steam_cmd_max_ms = cmd_max_ms; steam_cmd_at = now_ms;
+
+STEAM --> IDLE : LEAVE_STEAM / set_reply(OK);
+STEAM --> IDLE : MACHINE_STEAM_BUTTON
+STEAM --> IDLE : 1. do [elapsed(steam_cmd_at) >= steam_cmd_max_ms]
+STEAM --> IDLE : 2. do [elapsed(steam_started_at) >= device_max_steam_ms]
+STEAM --> OFF : 3. do [elapsed(auto_off_from) >= minutes(auto_off_min)]
+
+STEAM_HEATING : enter / set_steam_state(HEATING);
+STEAM_HEATING --> STEAM_READY : TEMP_READY
+STEAM_READY : enter / set_steam_state(READY);
+
+' ////////////////////////////// FAULT //////////////////////////////
+' Entering FAULT exits BREWING / STEAM, so their exit actions turn the pump and steam heater off.
+' The power relay is left as it was. TURN_OFF still works and decides where we go when the fault clears.
+
+FAULT : enter / set_phase(FAULT);
+FAULT : exit / set_phase(IDLE);
+FAULT : (TURN_ON, START_BREW, ENTER_STEAM) / set_reply(FAULT);
+FAULT : TURN_OFF / set_reply(OK); power_relay_on = false; set_power(OFF);
+FAULT : FAULT_DETECTED
+FAULT --> AFTER_FAULT : FAULT_CLEARED
+AFTER_FAULT --> ON : [power_relay_on]
+AFTER_FAULT --> OFF : else
+
+@enduml

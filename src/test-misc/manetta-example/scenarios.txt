@@ -1,0 +1,149 @@
+# Scenarios shared by the Rust runner (rust/src/main.rs) and the TypeScript runner (ts/runner.ts).
+#
+#   scenario <title>    new machine, now_ms = 0, start()
+#   set <var> <n>       write a variable (command arguments, device config)
+#   cmd <EVENT>         a BLE command write: reply = NONE, last_write_at = now_ms, dispatch, print
+#   ev <EVENT>          a machine / sensor event: dispatch, print
+#   wait <ms>           advance time in 100 ms ticks, dispatching `do` each tick; print every change
+#
+# Device config defaults: device_max_brew_ms 1800000, device_max_steam_ms 600000,
+# heartbeat_timeout_ms 10000, auto_off_min 30.
+
+scenario 1. normal brew, stopped by the command cap
+set cmd_max_ms 25000
+cmd TURN_ON
+cmd START_BREW
+ev TEMP_READY
+cmd START_BREW
+wait 4000
+cmd PING
+wait 4000
+cmd PING
+wait 4000
+cmd PING
+wait 4000
+cmd PING
+wait 4000
+cmd PING
+wait 4000
+cmd PING
+wait 2000
+
+scenario 2. heartbeat timeout (app goes quiet)
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 60000
+cmd START_BREW
+wait 12000
+
+scenario 3. STOP_BREW, and STOP_BREW is OK even when nothing is brewing
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 60000
+cmd START_BREW
+wait 3000
+cmd STOP_BREW
+cmd STOP_BREW
+
+scenario 4. TURN_OFF during a brew is BUSY
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 60000
+cmd START_BREW
+wait 1000
+cmd TURN_OFF
+cmd STOP_BREW
+cmd TURN_OFF
+
+scenario 5. steam, then cooling, then a brew
+cmd TURN_ON
+set cmd_max_ms 120000
+cmd ENTER_STEAM
+ev TEMP_READY
+cmd ENTER_STEAM
+ev TEMP_HEATING
+ev TEMP_READY
+wait 5000
+cmd LEAVE_STEAM
+set cmd_max_ms 20000
+cmd START_BREW
+ev TEMP_READY
+cmd START_BREW
+wait 5000
+cmd STOP_BREW
+
+scenario 6. ENTER_STEAM during a brew is BUSY
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 60000
+cmd START_BREW
+cmd ENTER_STEAM
+cmd STOP_BREW
+
+scenario 7. auto-off counts from the end of the last brew
+set auto_off_min 1
+cmd TURN_ON
+ev TEMP_READY
+wait 50000
+set cmd_max_ms 20000
+cmd START_BREW
+wait 3000
+cmd PING
+wait 3000
+cmd STOP_BREW
+wait 61000
+
+scenario 8. a fault during a brew
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 60000
+cmd START_BREW
+wait 2000
+ev FAULT_DETECTED
+cmd START_BREW
+cmd TURN_ON
+ev FAULT_CLEARED
+ev TEMP_READY
+cmd START_BREW
+cmd STOP_BREW
+
+scenario 9. steam: a repeat ENTER_STEAM replaces the command cap, the device cap counts from when steam began, link loss doesn't stop it
+set device_max_steam_ms 20000
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 10000
+cmd ENTER_STEAM
+wait 8000
+set cmd_max_ms 30000
+cmd ENTER_STEAM
+ev LINK_LOST
+wait 25000
+
+scenario 10. a brew started with the machine's switch ignores link loss and heartbeat
+cmd TURN_ON
+ev TEMP_READY
+ev MACHINE_BREW_SWITCH_ON
+ev LINK_LOST
+wait 15000
+ev MACHINE_BREW_SWITCH_OFF
+
+scenario 11. link loss stops an app brew; invalid arguments; off answers NOT_READY
+cmd START_BREW
+cmd ENTER_STEAM
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 0
+cmd START_BREW
+cmd ENTER_STEAM
+set cmd_max_ms 60000
+cmd START_BREW
+ev LINK_LOST
+
+scenario 12. a fault while off, TURN_OFF in fault, clearing back to off
+ev FAULT_DETECTED
+cmd TURN_OFF
+ev FAULT_CLEARED
+cmd TURN_ON
+ev FAULT_DETECTED
+cmd TURN_OFF
+ev FAULT_CLEARED

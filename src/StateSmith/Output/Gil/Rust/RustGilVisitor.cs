@@ -26,7 +26,7 @@ namespace StateSmith.Output.Gil.Rust;
 /// </summary>
 public class RustGilVisitor : CSharpSyntaxWalker
 {
-    public const string FileAttributes = "#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code, unreachable_code, unused_mut, unused_assignments, unused_parens, clippy::needless_return, clippy::single_match, clippy::upper_case_acronyms)]";
+    public const string FileAttributes = "#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code, unreachable_code, unused_mut, unused_assignments, unused_variables, unused_parens, clippy::needless_return, clippy::single_match, clippy::upper_case_acronyms)]";
     public const string EnumDerives = "#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]";
 
     private StringBuilder sb;

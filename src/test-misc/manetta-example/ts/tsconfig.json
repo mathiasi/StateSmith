@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "strict": true,
+    "outDir": "dist",
+    "rootDir": "."
+  },
+  "files": ["runner.ts", "ManettaSm.ts", "manetta_types.ts"]
+}
