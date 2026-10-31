@@ -9,6 +9,7 @@ using StateSmith.Output.Gil.CSharp;
 using StateSmith.Output.Gil.Java;
 using StateSmith.Output.Gil.JavaScript;
 using StateSmith.Output.Gil.Python;
+using StateSmith.Output.Gil.Rust;
 using StateSmith.Output.Gil.TypeScript;
 using StateSmith.Output.UserConfig.AutoVars;
 using System;
@@ -144,6 +145,22 @@ public class AlgoTranspilerCustomizer
                     if (algorithmId != AlgorithmId.Balanced2)
                     {
                         throw new Exception("TypeScript transpiler currently only supports `AlgorithmId.Balanced2`. Please reply to https://github.com/StateSmith/StateSmith/issues/407 .");
+                    }
+                }
+                break;
+
+            case TranspilerId.Rust:
+                {
+                    sp.AddSingletonT<IGilTranspiler, GilToRust>();
+                    sp.AddSingletonT<IExpansionVarsPathProvider, RustExpansionVarsPathProvider>();
+                    sp.AddSingletonT<NameMangler, RustNameMangler>();
+                    sp.AddSingletonT<IAutoVarsParser, RustAutoVarsParser>();
+                    algoBalanced1Settings.skipClassIndentation = false;
+                    algoBalanced1Settings.outputEnumMemberCount = false; // Rust enums can't hold a count member. Visitor emits consts instead.
+
+                    if (algorithmId != AlgorithmId.Balanced2)
+                    {
+                        throw new Exception("Rust transpiler currently only supports `AlgorithmId.Balanced2`. See https://github.com/StateSmith/StateSmith/issues/475 .");
                     }
                 }
                 break;

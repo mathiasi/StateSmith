@@ -256,7 +256,7 @@ public class AlgoBalanced1 : IGilAlgo
         file.AppendIndentedLine("// Starts the state machine. Must be called before dispatching events. Not thread safe.");
         file.AppendIndented($"public void {mangler.SmStartFuncName}()");
         file.StartCodeBlock();
-        file.AppendIndentedLine("this.ROOT_enter();");
+        file.AppendIndentedLine($"this.{mangler.SmTriggerHandlerFuncName(Sm, TriggerHelper.TRIGGER_ENTER)}();");
 
         var initialState = Sm.Children.OfType<InitialState>().Single();
 

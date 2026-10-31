@@ -1,0 +1,34 @@
+@startuml LightSm
+
+' Based on https://github.com/StateSmith/new-language-kickoff (LightSm.plantuml),
+' extended with an exit action and a history vertex for the Rust spike.
+' Action/guard code is Rust. `count`, `light_*()` and `record_group_exit()` are expansions
+' (see StateSmithTest/Output/Rust/RustLightSmGenTests.cs).
+
+state OFF
+state ON_GROUP {
+    state ON1
+    state ON2
+}
+
+[*] --> OFF
+
+OFF: enter / light_off();
+' INC from OFF resumes whichever ON state was last active (shallow history)
+OFF -left-> ON_GROUP[H]: INC
+ON_GROUP[H] --> ON1
+
+ON_GROUP -> OFF: OFF
+ON_GROUP: exit / record_group_exit();
+
+ON1: enter / light_blue();
+ON1 --> ON2: INC
+ON1 -right-> OFF: DIM
+
+ON2: enter / light_yellow();
+ON2: enter / count = 0;
+ON2: 1. INC / count += 1;
+ON2 --> ON1: DIM
+ON2 -> OFF: 2. INC [count >= 3]
+
+@enduml
