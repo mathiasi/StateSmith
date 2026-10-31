@@ -137,6 +137,13 @@ public class PlantUMLWalker : PlantUMLBaseListener
     /// <returns></returns>
     private DiagramNode GetOrAddNode(string pumlId, ParserRuleContext context)
     {
+        // EXPERIMENTAL (north-star): the state machine's own name refers to the root, so PlantUML can give the root
+        // behaviors (`MySm : PING / reply = Reply.OK;`) and transitions (`MySm --> FAULT : FAULT_DETECTED`) like draw.io can.
+        if (root.id.Length > 0 && pumlId == root.id)
+        {
+            return root;
+        }
+
         if (!nodeMap.TryGetValue(pumlId, out var node))
         {
             node = AddNode(pumlId);

@@ -32,7 +32,7 @@ Source: [`ManettaSm.plantuml`](ManettaSm.plantuml). Rendered with PlantUML 1.202
 ### Structure
 
 ```
-MANETTA                      PING / STOP_BREW / LEAVE_STEAM answer OK; FAULT_DETECTED -> FAULT
+ManettaSm (the machine)      PING / STOP_BREW / LEAVE_STEAM answer OK; FAULT_DETECTED -> FAULT
 ├── OFF                      relay off. START_BREW, ENTER_STEAM -> NOT_READY
 ├── ON                       relay on. TEMP_* events update `power`; START_BREW, ENTER_STEAM default to BUSY
 │   ├── IDLE                 starts brews and steam; auto-off
@@ -45,9 +45,10 @@ MANETTA                      PING / STOP_BREW / LEAVE_STEAM answer OK; FAULT_DET
 ```
 
 Changes from the suggested hierarchy, and why:
-- **An outer `MANETTA` state.** PlantUML input can't attach behaviours to the state machine root. The "true everywhere" answers
-  (PING, STOP_BREW and LEAVE_STEAM are always OK, and a fault from anywhere goes to FAULT) need a state to live on, so one wraps everything.
-  In draw.io or yEd input the root can carry behaviours, and this wrapper wouldn't be needed.
+- **Behaviours on the machine itself.** The "true everywhere" answers (PING, STOP_BREW and LEAVE_STEAM are always OK, and a fault from
+  anywhere goes to FAULT) are written on the root: `ManettaSm : PING / reply = Reply.OK;`. The picture draws them as a small `ManettaSm` box.
+  Stock StateSmith can't do this from PlantUML; this branch maps the machine's name to the root.
+  The earlier versions needed an outer `MANETTA` wrapper state instead.
 - **FAULT is a sibling of OFF and ON, not inside ON.** A fault can be detected while off. TURN_OFF must still work during a fault,
   and it decides whether clearing the fault returns to ON or OFF.
 - **Temperature is not a state.** HEATING, READY and COOLING run in parallel with everything else, so they are the `power`
@@ -386,8 +387,8 @@ Status on this branch: ✅ fixed by portable code, ◐ partly, ◻ still open (s
    - A choice point would give `else`, but its outgoing transitions would exit and re-enter IDLE just to answer a command.
 5. ◻ **Parallel concerns become "do nothing" overrides.** Steam must hide the brew temperature events from ON, which takes a bare
    `STEAM : (TEMP_HEATING, TEMP_READY, TEMP_TOO_HOT)` behaviour. It reads oddly unless you know that a behaviour with no action still consumes the event.
-6. ◻ **No root behaviours in PlantUML**, hence the outer `MANETTA` state.
-   The grammar also rejects `left to right direction`, which this picture needs to stay readable, so it sits in a
+6. ◐ **No root behaviours in PlantUML.** Now `ManettaSm : PING / ...` attaches to the machine itself, and the outer `MANETTA` wrapper state is gone.
+   Still open: the grammar rejects `left to right direction`, which this picture needs to stay readable, so it sits in a
    `' <StateSmith:ignore>` block. (`skinparam` lines are accepted.)
 7. ✅ **Enums can't be written portably.** Now `reply = Reply.OK;`, with the enum declared once in the diagram and generated for both languages.
    - Was: `Reply::OK` vs `Reply.OK` forced `set_reply(OK)` / `power_is(READY)` expansions.
@@ -396,7 +397,7 @@ Status on this branch: ✅ fixed by portable code, ◐ partly, ◻ still open (s
 8. ✅ **Variable declarations aren't language neutral.** Now declared once in the diagram; the C# glue is gone.
    - Was: the generator kept one C# table and rendered it per language, so the glue (expansions, var table) was a third language in a Rust and TypeScript build.
 9. ◻ **Commands answer through a `reply` variable.** Typed event payloads are planned (P3). It works, but every state path must remember to set `reply`:
-   MANETTA, ON and OFF hold defaults so nothing slips through. Event arguments (`cmd_max_ms`) are written to variables before the dispatch,
+   the root, ON and OFF hold defaults so nothing slips through. Event arguments (`cmd_max_ms`) are written to variables before the dispatch,
    because events carry no payload.
 10. ◐ **Naming compromise in Rust.** SCREAMING_CASE enum variants keep the diagram text identical for both languages, at the cost of
     `#![allow(...)]` lints. These now sit in the generated file, where the enums live.

@@ -29,31 +29,29 @@ export const EventIdCount: number = 18;
 export enum StateId
 {
     ROOT = 0,
-    MANETTA = 1,
-    FAULT = 2,
-    OFF = 3,
-    ON = 4,
-    BREWING = 5,
-    IDLE = 6,
-    STEAM = 7,
-    STEAM_HEATING = 8,
-    STEAM_READY = 9,
+    FAULT = 1,
+    OFF = 2,
+    ON = 3,
+    BREWING = 4,
+    IDLE = 5,
+    STEAM = 6,
+    STEAM_HEATING = 7,
+    STEAM_READY = 8,
 }
 
-export const StateIdCount: number = 10;
+export const StateIdCount: number = 9;
 
 // Subtree meta data generation can be disabled in settings.
 // Details: https://github.com/StateSmith/StateSmith/issues/538
-export const ROOT_SubtreeEndId: number = 9;  // State 'ManettaSm' subtree extends from itself (id: 0) to state 'STEAM_READY' (id: 9)
-export const MANETTA_SubtreeEndId: number = 9;  // State 'MANETTA' subtree extends from itself (id: 1) to state 'STEAM_READY' (id: 9)
-export const FAULT_SubtreeEndId: number = 2;  // State 'FAULT' subtree extends from itself (id: 2) to state 'FAULT' (id: 2)
-export const OFF_SubtreeEndId: number = 3;  // State 'OFF' subtree extends from itself (id: 3) to state 'OFF' (id: 3)
-export const ON_SubtreeEndId: number = 9;  // State 'ON' subtree extends from itself (id: 4) to state 'STEAM_READY' (id: 9)
-export const BREWING_SubtreeEndId: number = 5;  // State 'BREWING' subtree extends from itself (id: 5) to state 'BREWING' (id: 5)
-export const IDLE_SubtreeEndId: number = 6;  // State 'IDLE' subtree extends from itself (id: 6) to state 'IDLE' (id: 6)
-export const STEAM_SubtreeEndId: number = 9;  // State 'STEAM' subtree extends from itself (id: 7) to state 'STEAM_READY' (id: 9)
-export const STEAM_HEATING_SubtreeEndId: number = 8;  // State 'STEAM_HEATING' subtree extends from itself (id: 8) to state 'STEAM_HEATING' (id: 8)
-export const STEAM_READY_SubtreeEndId: number = 9;  // State 'STEAM_READY' subtree extends from itself (id: 9) to state 'STEAM_READY' (id: 9)
+export const ROOT_SubtreeEndId: number = 8;  // State 'ManettaSm' subtree extends from itself (id: 0) to state 'STEAM_READY' (id: 8)
+export const FAULT_SubtreeEndId: number = 1;  // State 'FAULT' subtree extends from itself (id: 1) to state 'FAULT' (id: 1)
+export const OFF_SubtreeEndId: number = 2;  // State 'OFF' subtree extends from itself (id: 2) to state 'OFF' (id: 2)
+export const ON_SubtreeEndId: number = 8;  // State 'ON' subtree extends from itself (id: 3) to state 'STEAM_READY' (id: 8)
+export const BREWING_SubtreeEndId: number = 4;  // State 'BREWING' subtree extends from itself (id: 4) to state 'BREWING' (id: 4)
+export const IDLE_SubtreeEndId: number = 5;  // State 'IDLE' subtree extends from itself (id: 5) to state 'IDLE' (id: 5)
+export const STEAM_SubtreeEndId: number = 8;  // State 'STEAM' subtree extends from itself (id: 6) to state 'STEAM_READY' (id: 8)
+export const STEAM_HEATING_SubtreeEndId: number = 7;  // State 'STEAM_HEATING' subtree extends from itself (id: 7) to state 'STEAM_HEATING' (id: 7)
+export const STEAM_READY_SubtreeEndId: number = 8;  // State 'STEAM_READY' subtree extends from itself (id: 8) to state 'STEAM_READY' (id: 8)
 
 // User types (portable code)
 export enum Reply { NONE, OK, BUSY, NOT_READY, FAULT, INVALID }
@@ -124,28 +122,17 @@ export class ManettaSm
             // ROOT.<InitialState> is a pseudo state and cannot have an `enter` trigger.
             
             // ROOT.<InitialState> behavior
-            // uml: TransitionTo(MANETTA)
+            // uml: TransitionTo(OFF)
             {
                 // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition). Already at LCA, no exiting required.
                 
                 // Step 2: Transition action: ``.
                 
-                // Step 3: Enter/move towards transition target `MANETTA`.
-                this.MANETTA_enter();
+                // Step 3: Enter/move towards transition target `OFF`.
+                this.OFF_enter();
                 
-                // MANETTA.<InitialState> behavior
-                // uml: TransitionTo(OFF)
-                {
-                    // Step 1: Exit states until we reach `MANETTA` state (Least Common Ancestor for transition). Already at LCA, no exiting required.
-                    
-                    // Step 2: Transition action: ``.
-                    
-                    // Step 3: Enter/move towards transition target `OFF`.
-                    this.OFF_enter();
-                    
-                    // Step 4: complete transition. Ends event dispatch. No other behaviors are checked.
-                    return;
-                } // end of behavior for MANETTA.<InitialState>
+                // Step 4: complete transition. Ends event dispatch. No other behaviors are checked.
+                return;
             } // end of behavior for ROOT.<InitialState>
         } // end of behavior for ROOT
     }
@@ -158,17 +145,12 @@ export class ManettaSm
         {
             // STATE: ManettaSm
             case StateId.ROOT:
-                // No events handled by this state (or its ancestors).
-                break;
-            
-            // STATE: MANETTA
-            case StateId.MANETTA:
                 switch (eventId)
                 {
-                    case EventId.PING: this.MANETTA_ping(); break;
-                    case EventId.STOP_BREW: this.MANETTA_stop_brew(); break;
-                    case EventId.LEAVE_STEAM: this.MANETTA_leave_steam(); break;
-                    case EventId.FAULT_DETECTED: this.MANETTA_fault_detected(); break;
+                    case EventId.PING: this.ROOT_ping(); break;
+                    case EventId.STOP_BREW: this.ROOT_stop_brew(); break;
+                    case EventId.LEAVE_STEAM: this.ROOT_leave_steam(); break;
+                    case EventId.FAULT_DETECTED: this.ROOT_fault_detected(); break;
                 }
                 break;
             
@@ -182,9 +164,9 @@ export class ManettaSm
                     case EventId.TURN_OFF: this.FAULT_turn_off(); break;
                     case EventId.FAULT_DETECTED: this.FAULT_fault_detected(); break;
                     case EventId.FAULT_CLEARED: this.FAULT_fault_cleared(); break;
-                    case EventId.PING: this.MANETTA_ping(); break; // First ancestor handler for this event
-                    case EventId.STOP_BREW: this.MANETTA_stop_brew(); break; // First ancestor handler for this event
-                    case EventId.LEAVE_STEAM: this.MANETTA_leave_steam(); break; // First ancestor handler for this event
+                    case EventId.PING: this.ROOT_ping(); break; // First ancestor handler for this event
+                    case EventId.STOP_BREW: this.ROOT_stop_brew(); break; // First ancestor handler for this event
+                    case EventId.LEAVE_STEAM: this.ROOT_leave_steam(); break; // First ancestor handler for this event
                 }
                 break;
             
@@ -197,10 +179,10 @@ export class ManettaSm
                     case EventId.ENTER_STEAM: this.OFF_enter_steam(); break;
                     case EventId.TURN_ON: this.OFF_turn_on(); break;
                     case EventId.MACHINE_POWER_SWITCH: this.OFF_machine_power_switch(); break;
-                    case EventId.PING: this.MANETTA_ping(); break; // First ancestor handler for this event
-                    case EventId.STOP_BREW: this.MANETTA_stop_brew(); break; // First ancestor handler for this event
-                    case EventId.LEAVE_STEAM: this.MANETTA_leave_steam(); break; // First ancestor handler for this event
-                    case EventId.FAULT_DETECTED: this.MANETTA_fault_detected(); break; // First ancestor handler for this event
+                    case EventId.PING: this.ROOT_ping(); break; // First ancestor handler for this event
+                    case EventId.STOP_BREW: this.ROOT_stop_brew(); break; // First ancestor handler for this event
+                    case EventId.LEAVE_STEAM: this.ROOT_leave_steam(); break; // First ancestor handler for this event
+                    case EventId.FAULT_DETECTED: this.ROOT_fault_detected(); break; // First ancestor handler for this event
                 }
                 break;
             
@@ -216,10 +198,10 @@ export class ManettaSm
                     case EventId.TEMP_TOO_HOT: this.ON_temp_too_hot(); break;
                     case EventId.TURN_OFF: this.ON_turn_off(); break;
                     case EventId.MACHINE_POWER_SWITCH: this.ON_machine_power_switch(); break;
-                    case EventId.PING: this.MANETTA_ping(); break; // First ancestor handler for this event
-                    case EventId.STOP_BREW: this.MANETTA_stop_brew(); break; // First ancestor handler for this event
-                    case EventId.LEAVE_STEAM: this.MANETTA_leave_steam(); break; // First ancestor handler for this event
-                    case EventId.FAULT_DETECTED: this.MANETTA_fault_detected(); break; // First ancestor handler for this event
+                    case EventId.PING: this.ROOT_ping(); break; // First ancestor handler for this event
+                    case EventId.STOP_BREW: this.ROOT_stop_brew(); break; // First ancestor handler for this event
+                    case EventId.LEAVE_STEAM: this.ROOT_leave_steam(); break; // First ancestor handler for this event
+                    case EventId.FAULT_DETECTED: this.ROOT_fault_detected(); break; // First ancestor handler for this event
                 }
                 break;
             
@@ -234,8 +216,8 @@ export class ManettaSm
                     case EventId.LINK_LOST: this.BREWING_link_lost(); break;
                     case EventId.MACHINE_POWER_SWITCH: this.BREWING_machine_power_switch(); break;
                     case EventId.FAULT_DETECTED: this.BREWING_fault_detected(); break;
-                    case EventId.PING: this.MANETTA_ping(); break; // First ancestor handler for this event
-                    case EventId.LEAVE_STEAM: this.MANETTA_leave_steam(); break; // First ancestor handler for this event
+                    case EventId.PING: this.ROOT_ping(); break; // First ancestor handler for this event
+                    case EventId.LEAVE_STEAM: this.ROOT_leave_steam(); break; // First ancestor handler for this event
                     case EventId.START_BREW: this.ON_start_brew(); break; // First ancestor handler for this event
                     case EventId.ENTER_STEAM: this.ON_enter_steam(); break; // First ancestor handler for this event
                     case EventId.TURN_ON: this.ON_turn_on(); break; // First ancestor handler for this event
@@ -254,10 +236,10 @@ export class ManettaSm
                     case EventId.MACHINE_BREW_SWITCH_ON: this.IDLE_machine_brew_switch_on(); break;
                     case EventId.MACHINE_STEAM_BUTTON: this.IDLE_machine_steam_button(); break;
                     case EventId.DO: this.IDLE_do(); break;
-                    case EventId.PING: this.MANETTA_ping(); break; // First ancestor handler for this event
-                    case EventId.STOP_BREW: this.MANETTA_stop_brew(); break; // First ancestor handler for this event
-                    case EventId.LEAVE_STEAM: this.MANETTA_leave_steam(); break; // First ancestor handler for this event
-                    case EventId.FAULT_DETECTED: this.MANETTA_fault_detected(); break; // First ancestor handler for this event
+                    case EventId.PING: this.ROOT_ping(); break; // First ancestor handler for this event
+                    case EventId.STOP_BREW: this.ROOT_stop_brew(); break; // First ancestor handler for this event
+                    case EventId.LEAVE_STEAM: this.ROOT_leave_steam(); break; // First ancestor handler for this event
+                    case EventId.FAULT_DETECTED: this.ROOT_fault_detected(); break; // First ancestor handler for this event
                     case EventId.TURN_OFF: this.ON_turn_off(); break; // First ancestor handler for this event
                     case EventId.TURN_ON: this.ON_turn_on(); break; // First ancestor handler for this event
                     case EventId.MACHINE_POWER_SWITCH: this.ON_machine_power_switch(); break; // First ancestor handler for this event
@@ -278,9 +260,9 @@ export class ManettaSm
                     case EventId.TEMP_TOO_HOT: this.STEAM_temp_too_hot(); break;
                     case EventId.LEAVE_STEAM: this.STEAM_leave_steam(); break;
                     case EventId.MACHINE_STEAM_BUTTON: this.STEAM_machine_steam_button(); break;
-                    case EventId.PING: this.MANETTA_ping(); break; // First ancestor handler for this event
-                    case EventId.STOP_BREW: this.MANETTA_stop_brew(); break; // First ancestor handler for this event
-                    case EventId.FAULT_DETECTED: this.MANETTA_fault_detected(); break; // First ancestor handler for this event
+                    case EventId.PING: this.ROOT_ping(); break; // First ancestor handler for this event
+                    case EventId.STOP_BREW: this.ROOT_stop_brew(); break; // First ancestor handler for this event
+                    case EventId.FAULT_DETECTED: this.ROOT_fault_detected(); break; // First ancestor handler for this event
                     case EventId.TURN_OFF: this.ON_turn_off(); break; // First ancestor handler for this event
                     case EventId.START_BREW: this.ON_start_brew(); break; // First ancestor handler for this event
                     case EventId.TURN_ON: this.ON_turn_on(); break; // First ancestor handler for this event
@@ -293,10 +275,10 @@ export class ManettaSm
                 switch (eventId)
                 {
                     case EventId.TEMP_READY: this.STEAM_HEATING_temp_ready(); break;
-                    case EventId.PING: this.MANETTA_ping(); break; // First ancestor handler for this event
-                    case EventId.STOP_BREW: this.MANETTA_stop_brew(); break; // First ancestor handler for this event
+                    case EventId.PING: this.ROOT_ping(); break; // First ancestor handler for this event
+                    case EventId.STOP_BREW: this.ROOT_stop_brew(); break; // First ancestor handler for this event
                     case EventId.LEAVE_STEAM: this.STEAM_leave_steam(); break; // First ancestor handler for this event
-                    case EventId.FAULT_DETECTED: this.MANETTA_fault_detected(); break; // First ancestor handler for this event
+                    case EventId.FAULT_DETECTED: this.ROOT_fault_detected(); break; // First ancestor handler for this event
                     case EventId.TURN_OFF: this.ON_turn_off(); break; // First ancestor handler for this event
                     case EventId.START_BREW: this.ON_start_brew(); break; // First ancestor handler for this event
                     case EventId.ENTER_STEAM: this.STEAM_enter_steam(); break; // First ancestor handler for this event
@@ -313,10 +295,10 @@ export class ManettaSm
             case StateId.STEAM_READY:
                 switch (eventId)
                 {
-                    case EventId.PING: this.MANETTA_ping(); break; // First ancestor handler for this event
-                    case EventId.STOP_BREW: this.MANETTA_stop_brew(); break; // First ancestor handler for this event
+                    case EventId.PING: this.ROOT_ping(); break; // First ancestor handler for this event
+                    case EventId.STOP_BREW: this.ROOT_stop_brew(); break; // First ancestor handler for this event
                     case EventId.LEAVE_STEAM: this.STEAM_leave_steam(); break; // First ancestor handler for this event
-                    case EventId.FAULT_DETECTED: this.MANETTA_fault_detected(); break; // First ancestor handler for this event
+                    case EventId.FAULT_DETECTED: this.ROOT_fault_detected(); break; // First ancestor handler for this event
                     case EventId.TURN_OFF: this.ON_turn_off(); break; // First ancestor handler for this event
                     case EventId.START_BREW: this.ON_start_brew(); break; // First ancestor handler for this event
                     case EventId.ENTER_STEAM: this.STEAM_enter_steam(); break; // First ancestor handler for this event
@@ -341,8 +323,6 @@ export class ManettaSm
         {
             switch (this.stateId)
             {
-                case StateId.MANETTA: this.MANETTA_exit(); break;
-                
                 case StateId.FAULT: this.FAULT_exit(); break;
                 
                 case StateId.OFF: this.OFF_exit(); break;
@@ -374,28 +354,13 @@ export class ManettaSm
         this.stateId = StateId.ROOT;
     }
     
-    
-    ////////////////////////////////////////////////////////////////////////////////
-    // event handlers for state MANETTA
-    ////////////////////////////////////////////////////////////////////////////////
-    
-    private MANETTA_enter(): void 
+    private ROOT_fault_detected(): void 
     {
-        this.stateId = StateId.MANETTA;
-    }
-    
-    private MANETTA_exit(): void 
-    {
-        this.stateId = StateId.ROOT;
-    }
-    
-    private MANETTA_fault_detected(): void 
-    {
-        // MANETTA behavior
+        // ROOT behavior
         // uml: FAULT_DETECTED TransitionTo(FAULT)
         {
-            // Step 1: Exit states until we reach `MANETTA` state (Least Common Ancestor for transition).
-            this.exitUpToStateHandler(StateId.MANETTA);
+            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
+            this.exitUpToStateHandler(StateId.ROOT);
             
             // Step 2: Transition action: ``.
             
@@ -404,43 +369,43 @@ export class ManettaSm
             
             // Step 4: complete transition. Ends event dispatch. No other behaviors are checked.
             return;
-        } // end of behavior for MANETTA
+        } // end of behavior for ROOT
         
         // No ancestor handles this event.
     }
     
-    private MANETTA_leave_steam(): void 
+    private ROOT_leave_steam(): void 
     {
-        // MANETTA behavior
+        // ROOT behavior
         // uml: LEAVE_STEAM / { reply = Reply.OK; }
         {
             // Step 1: execute action `reply = Reply.OK;`
             this.vars.reply = Reply.OK;
-        } // end of behavior for MANETTA
+        } // end of behavior for ROOT
         
         // No ancestor handles this event.
     }
     
-    private MANETTA_ping(): void 
+    private ROOT_ping(): void 
     {
-        // MANETTA behavior
+        // ROOT behavior
         // uml: PING / { reply = Reply.OK; }
         {
             // Step 1: execute action `reply = Reply.OK;`
             this.vars.reply = Reply.OK;
-        } // end of behavior for MANETTA
+        } // end of behavior for ROOT
         
         // No ancestor handles this event.
     }
     
-    private MANETTA_stop_brew(): void 
+    private ROOT_stop_brew(): void 
     {
-        // MANETTA behavior
+        // ROOT behavior
         // uml: STOP_BREW / { reply = Reply.OK; }
         {
             // Step 1: execute action `reply = Reply.OK;`
             this.vars.reply = Reply.OK;
-        } // end of behavior for MANETTA
+        } // end of behavior for ROOT
         
         // No ancestor handles this event.
     }
@@ -471,7 +436,7 @@ export class ManettaSm
             this.vars.phase = Phase.IDLE;
         } // end of behavior for FAULT
         
-        this.stateId = StateId.MANETTA;
+        this.stateId = StateId.ROOT;
     }
     
     private FAULT_enter_steam(): void 
@@ -489,21 +454,21 @@ export class ManettaSm
     private FAULT_fault_cleared(): void 
     {
         // FAULT behavior
-        // uml: FAULT_CLEARED TransitionTo(MANETTA.<ChoicePoint>(AFTER_FAULT))
+        // uml: FAULT_CLEARED TransitionTo(ROOT.<ChoicePoint>(AFTER_FAULT))
         {
-            // Step 1: Exit states until we reach `MANETTA` state (Least Common Ancestor for transition).
+            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
             this.FAULT_exit();
             
             // Step 2: Transition action: ``.
             
-            // Step 3: Enter/move towards transition target `MANETTA.<ChoicePoint>(AFTER_FAULT)`.
-            // MANETTA.<ChoicePoint>(AFTER_FAULT) is a pseudo state and cannot have an `enter` trigger.
+            // Step 3: Enter/move towards transition target `ROOT.<ChoicePoint>(AFTER_FAULT)`.
+            // ROOT.<ChoicePoint>(AFTER_FAULT) is a pseudo state and cannot have an `enter` trigger.
             
-            // MANETTA.<ChoicePoint>(AFTER_FAULT) behavior
+            // ROOT.<ChoicePoint>(AFTER_FAULT) behavior
             // uml: [power_relay_on] TransitionTo(ON)
             if (this.vars.power_relay_on)
             {
-                // Step 1: Exit states until we reach `MANETTA` state (Least Common Ancestor for transition). Already at LCA, no exiting required.
+                // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition). Already at LCA, no exiting required.
                 
                 // Step 2: Transition action: ``.
                 
@@ -513,12 +478,12 @@ export class ManettaSm
                 // Finish transition by calling pseudo state transition function.
                 this.ON_InitialState_transition();
                 return; // event processing immediately stops when a transition finishes. No other behaviors for this state are checked.
-            } // end of behavior for MANETTA.<ChoicePoint>(AFTER_FAULT)
+            } // end of behavior for ROOT.<ChoicePoint>(AFTER_FAULT)
             
-            // MANETTA.<ChoicePoint>(AFTER_FAULT) behavior
+            // ROOT.<ChoicePoint>(AFTER_FAULT) behavior
             // uml: else TransitionTo(OFF)
             {
-                // Step 1: Exit states until we reach `MANETTA` state (Least Common Ancestor for transition). Already at LCA, no exiting required.
+                // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition). Already at LCA, no exiting required.
                 
                 // Step 2: Transition action: ``.
                 
@@ -527,7 +492,7 @@ export class ManettaSm
                 
                 // Step 4: complete transition. Ends event dispatch. No other behaviors are checked.
                 return;
-            } // end of behavior for MANETTA.<ChoicePoint>(AFTER_FAULT)
+            } // end of behavior for ROOT.<ChoicePoint>(AFTER_FAULT)
         } // end of behavior for FAULT
         
         // No ancestor handles this event.
@@ -548,7 +513,7 @@ export class ManettaSm
         // Check if event has been consumed before calling ancestor handler.
         if (!consume_event)
         {
-            this.MANETTA_fault_detected();
+            this.ROOT_fault_detected();
         }
     }
     
@@ -607,7 +572,7 @@ export class ManettaSm
     
     private OFF_exit(): void 
     {
-        this.stateId = StateId.MANETTA;
+        this.stateId = StateId.ROOT;
     }
     
     private OFF_enter_steam(): void 
@@ -627,7 +592,7 @@ export class ManettaSm
         // OFF behavior
         // uml: MACHINE_POWER_SWITCH TransitionTo(ON)
         {
-            // Step 1: Exit states until we reach `MANETTA` state (Least Common Ancestor for transition).
+            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
             this.OFF_exit();
             
             // Step 2: Transition action: ``.
@@ -672,7 +637,7 @@ export class ManettaSm
         // OFF behavior
         // uml: TURN_ON / { reply = Reply.OK; } TransitionTo(ON)
         {
-            // Step 1: Exit states until we reach `MANETTA` state (Least Common Ancestor for transition).
+            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
             this.OFF_exit();
             
             // Step 2: Transition action: `reply = Reply.OK;`.
@@ -708,7 +673,7 @@ export class ManettaSm
     
     private ON_exit(): void 
     {
-        this.stateId = StateId.MANETTA;
+        this.stateId = StateId.ROOT;
     }
     
     private ON_enter_steam(): void 
@@ -728,8 +693,8 @@ export class ManettaSm
         // ON behavior
         // uml: MACHINE_POWER_SWITCH TransitionTo(OFF)
         {
-            // Step 1: Exit states until we reach `MANETTA` state (Least Common Ancestor for transition).
-            this.exitUpToStateHandler(StateId.MANETTA);
+            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
+            this.exitUpToStateHandler(StateId.ROOT);
             
             // Step 2: Transition action: ``.
             
@@ -796,8 +761,8 @@ export class ManettaSm
         // ON behavior
         // uml: TURN_OFF / { reply = Reply.OK; } TransitionTo(OFF)
         {
-            // Step 1: Exit states until we reach `MANETTA` state (Least Common Ancestor for transition).
-            this.exitUpToStateHandler(StateId.MANETTA);
+            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
+            this.exitUpToStateHandler(StateId.ROOT);
             
             // Step 2: Transition action: `reply = Reply.OK;`.
             this.vars.reply = Reply.OK;
@@ -940,8 +905,8 @@ export class ManettaSm
         // BREWING behavior
         // uml: FAULT_DETECTED / { stop_reason = StopReason.FAULT; } TransitionTo(FAULT)
         {
-            // Step 1: Exit states until we reach `MANETTA` state (Least Common Ancestor for transition).
-            this.exitUpToStateHandler(StateId.MANETTA);
+            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
+            this.exitUpToStateHandler(StateId.ROOT);
             
             // Step 2: Transition action: `stop_reason = StopReason.FAULT;`.
             this.vars.stop_reason = StopReason.FAULT;
@@ -956,7 +921,7 @@ export class ManettaSm
         // Check if event has been consumed before calling ancestor handler.
         if (!consume_event)
         {
-            this.MANETTA_fault_detected();
+            this.ROOT_fault_detected();
         }
     }
     
@@ -1010,8 +975,8 @@ export class ManettaSm
         // BREWING behavior
         // uml: MACHINE_POWER_SWITCH / { stop_reason = StopReason.MACHINE; } TransitionTo(OFF)
         {
-            // Step 1: Exit states until we reach `MANETTA` state (Least Common Ancestor for transition).
-            this.exitUpToStateHandler(StateId.MANETTA);
+            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
+            this.exitUpToStateHandler(StateId.ROOT);
             
             // Step 2: Transition action: `stop_reason = StopReason.MACHINE;`.
             this.vars.stop_reason = StopReason.MACHINE;
@@ -1053,7 +1018,7 @@ export class ManettaSm
         // Check if event has been consumed before calling ancestor handler.
         if (!consume_event)
         {
-            this.MANETTA_stop_brew();
+            this.ROOT_stop_brew();
         }
     }
     
@@ -1098,8 +1063,8 @@ export class ManettaSm
         // uml: do [elapsed(auto_off_from) >= auto_off_min * 60000] TransitionTo(OFF)
         if ((((this.vars.now_ms - this.vars.auto_off_from) >>> 0)) >= (Math.imul(this.vars.auto_off_min, 60000) >>> 0))
         {
-            // Step 1: Exit states until we reach `MANETTA` state (Least Common Ancestor for transition).
-            this.exitUpToStateHandler(StateId.MANETTA);
+            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
+            this.exitUpToStateHandler(StateId.ROOT);
             
             // Step 2: Transition action: ``.
             
@@ -1328,8 +1293,8 @@ export class ManettaSm
         // uml: 3. do [elapsed(auto_off_from) >= auto_off_min * 60000] TransitionTo(OFF)
         if ((((this.vars.now_ms - this.vars.auto_off_from) >>> 0)) >= (Math.imul(this.vars.auto_off_min, 60000) >>> 0))
         {
-            // Step 1: Exit states until we reach `MANETTA` state (Least Common Ancestor for transition).
-            this.exitUpToStateHandler(StateId.MANETTA);
+            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
+            this.exitUpToStateHandler(StateId.ROOT);
             
             // Step 2: Transition action: ``.
             
@@ -1397,7 +1362,7 @@ export class ManettaSm
         // Check if event has been consumed before calling ancestor handler.
         if (!consume_event)
         {
-            this.MANETTA_leave_steam();
+            this.ROOT_leave_steam();
         }
     }
     
@@ -1571,7 +1536,6 @@ export class ManettaSm
         switch (id)
         {
             case StateId.ROOT: return "ROOT";
-            case StateId.MANETTA: return "MANETTA";
             case StateId.FAULT: return "FAULT";
             case StateId.OFF: return "OFF";
             case StateId.ON: return "ON";
@@ -1618,10 +1582,9 @@ export class ManettaSm
         switch (id)
         {
             case StateId.ROOT: return StateId.ROOT;
-            case StateId.MANETTA: return StateId.ROOT;
-            case StateId.FAULT: return StateId.MANETTA;
-            case StateId.OFF: return StateId.MANETTA;
-            case StateId.ON: return StateId.MANETTA;
+            case StateId.FAULT: return StateId.ROOT;
+            case StateId.OFF: return StateId.ROOT;
+            case StateId.ON: return StateId.ROOT;
             case StateId.BREWING: return StateId.ON;
             case StateId.IDLE: return StateId.ON;
             case StateId.STEAM: return StateId.ON;

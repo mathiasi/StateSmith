@@ -69,32 +69,27 @@ uint auto_off_from = 0;              // later of the last TURN_ON and the end of
 
 ' ////////////////////////////// STATES //////////////////////////////
 
-state MANETTA {
-    [*] --> OFF
-    state OFF
-    state ON {
-        [*] --> IDLE
-        state IDLE
-        state BREWING
-        state STEAM {
-            [*] --> STEAM_HEATING
-            state STEAM_HEATING
-            state STEAM_READY
-        }
+[*] --> OFF
+state OFF
+state ON {
+    [*] --> IDLE
+    state IDLE
+    state BREWING
+    state STEAM {
+        [*] --> STEAM_HEATING
+        state STEAM_HEATING
+        state STEAM_READY
     }
-    state FAULT
-    state AFTER_FAULT <<choice>>
 }
+state FAULT
+state AFTER_FAULT <<choice>>
 
-[*] --> MANETTA
+' ////////////////// ROOT (the machine itself): true in every state unless a child overrides it //////////////////
 
-' ////////////////// MANETTA: true in every state unless a child overrides it //////////////////
-' (PlantUML input can't attach behaviors to the state machine root, hence this outer state.)
-
-MANETTA : PING / reply = Reply.OK;
-MANETTA : STOP_BREW / reply = Reply.OK;
-MANETTA : LEAVE_STEAM / reply = Reply.OK;
-MANETTA --> FAULT : FAULT_DETECTED
+ManettaSm : PING / reply = Reply.OK;
+ManettaSm : STOP_BREW / reply = Reply.OK;
+ManettaSm : LEAVE_STEAM / reply = Reply.OK;
+ManettaSm --> FAULT : FAULT_DETECTED
 
 ' ////////////////////////////// OFF //////////////////////////////
 

@@ -40,7 +40,7 @@ void log(StopReason why);
 """
 '/
 
-ManettaSm : PING / reply = Reply.OK;                         ' ◻ P4 root behaviours in PlantUML (no wrapper state)
+ManettaSm : PING / reply = Reply.OK;                         ' ✅ root behaviours in PlantUML (no wrapper state)
 
 IDLE --> BREWING : START_BREW [max_ms != 0 && power == Power.READY] / reply = Reply.OK; brew_cmd_max_ms = max_ms;
                                                              ' ✅ portable code   ◻ P3 `max_ms` payload (today: `cmd_max_ms` var)
@@ -110,7 +110,7 @@ What stays out on purpose:
 | **P1** | **Portable code**: `[RenderConfig.Portable]` Types + Variables; all diagram code is GIL | declarations emitted into GIL; vars auto-expanded with the GIL path; action and guard code wrapped as GIL instead of raw echo | spike: done. Upstream: 1–2 weeks (make every transpiler handle field initialisers, unsigned math and user enums; explicit opt-in switch; docs) | **✅ Rust + TS** |
 | **P2** | **Time**: `after(ms)`, `elapsed(t)` | transform adds `{STATE}_entered_at` plus an entry action; text rewrite at expansion; transpilers map unsigned `+ - *` to wrapping ops | spike done: `after(ms)` trigger (grammar), `elapsed()`, generated `next_deadline_ms()`. Upstream: all transpilers, plus a decision on one-shot vs level-triggered `after()`: about 1 week | **✅ Rust + TS** |
 | P3 | Host calls and event payloads | `Functions` → a Rust trait as a generic parameter (`ManettaSm<H: ManettaHost>`) plus a TS interface; `START_BREW(uint max_ms)` → typed `dispatch_start_brew(max_ms)` | 2–3 weeks; needs generics support in the Rust visitor and an agreed design for each target | ◻ |
-| P4 | Diagram ergonomics | root behaviours in PlantUML; accept `left to right direction`; `in(STATE)` guard (subtree-id range check); event groups `(COMMANDS)` | about 1 week, mostly grammar plus small transforms | ◻ |
+| P4 | Diagram ergonomics | root behaviours in PlantUML; accept `left to right direction`; `in(STATE)` guard (subtree-id range check); event groups `(COMMANDS)` | about 1 week, mostly grammar plus small transforms | ◐ root behaviours done |
 | P5 | Orthogonal regions | per-region state ids, dispatch to each region, cross-region exit, `in()` across regions (see the earlier analysis) | 4–8 weeks, core algorithm; only if a truly independent concern appears | ◻ (not needed for Manetta) |
 
 Upstream path: P1 and P2 help all eight languages, not just Rust, so they make a good first discussion with the maintainer
@@ -137,6 +137,8 @@ Upstream path: P1 and P2 help all eight languages, not just Rust, so they make a
   - other guard conditions are ignored, so a host may wake early, never late.
 
   Rust gets `&self` for such pure queries, and the generated enums now also derive `PartialOrd, Ord` for the range check.
+- **Root behaviours in PlantUML (P4):** the machine's own name refers to the root, so `ManettaSm : PING / ...` and `ManettaSm --> FAULT : FAULT_DETECTED` work.
+  The Manetta example drops its `MANETTA` wrapper state (tested in `PlantUmlRootBehaviorTests`; the trace is unchanged).
 - **Transpilers:** Rust and TypeScript map unsigned `+ - *` to `wrapping_*` and `>>> 0` / `Math.imul`. TypeScript maps `uint` and similar types to `number`.
   The Rust target declares `Vars` as a class in GIL, so fields can have initialisers; the Rust output is unchanged.
 
@@ -154,7 +156,7 @@ Upstream path: P1 and P2 help all eight languages, not just Rust, so they make a
   unknown trigger call (`every(ms)`), and a typo (`Light.ONN`) failing at generation time.
   The last one is a real gain over raw target code: StateSmith compiles portable code with Roslyn, so mistakes surface once, before any target compiler runs.
 - `ManettaExampleGenTests.RustAndTypeScriptTracesMatch`: Rust == TypeScript, and polling == sleeping for both, with the 25 vs 2,190 dispatch counts asserted.
-- Full suite: 757 pass, and the 92 failures are the same set as on the untouched base commit (environmental, Java and TypeScript Spec2 tooling in this container), nothing new.
+- Full suite: 758 pass, and the 92 failures are the same set as on the untouched base commit (environmental, Java and TypeScript Spec2 tooling in this container), nothing new.
   No other language's committed output changed.
 
 **Known limits of the spike:**
@@ -174,4 +176,4 @@ Upstream path: P1 and P2 help all eight languages, not just Rust, so they make a
 **Next concrete steps:**
 1. P3: design the host trait / interface (`ManettaHost`), then typed event payloads (`START_BREW(uint max_ms)`).
 2. P1/P2 hardening: C99 and C# in portable mode, plus a Spec2-style portable spec run in several languages.
-3. P4: root behaviours in PlantUML (drop the `MANETTA` wrapper), and accept `left to right direction`.
+3. P4 remainder: accept `left to right direction`, an `in(STATE)` guard, event groups.

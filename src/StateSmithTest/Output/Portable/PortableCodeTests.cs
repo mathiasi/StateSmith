@@ -125,3 +125,33 @@ public class PortableCodeTests
         action.Should().Throw<System.Exception>().WithMessage("*need a time variable*");
     }
 }
+
+/// <summary>
+/// EXPERIMENTAL (north-star): in PlantUML, the state machine's own name refers to the root, so the root can have
+/// behaviors and transitions (draw.io could already do this).
+/// </summary>
+public class PlantUmlRootBehaviorTests
+{
+    [Fact]
+    public void RootBehaviorsAndTransitions()
+    {
+        var plantUml = """
+            @startuml RootSm
+            [*] --> A
+            state A
+            state B
+            RootSm : PING / ping_count += 1;
+            RootSm --> B : RESET
+            @enduml
+            """;
+
+        var fakeFs = new CapturingCodeFileWriter();
+        TestHelper.CaptureCodeGenRunSmRunnerForPlantUmlString(plantUmlText: plantUml, codeFileWriter: fakeFs, transpilerId: TranspilerId.CSharp);
+        var code = fakeFs.GetSoleCaptureWithName("RootSm.cs").code;
+
+        code.Should().Contain("private void ROOT_ping()");
+        code.Should().Contain("ping_count += 1;");
+        code.Should().Contain("private void ROOT_reset()");
+        code.Should().NotContain("ROOTSM"); // no separate state named after the machine
+    }
+}
