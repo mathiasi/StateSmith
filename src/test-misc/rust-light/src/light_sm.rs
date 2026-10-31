@@ -7,7 +7,7 @@
 use crate::light::Light;
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum EventId {
     #[default]
     DIM = 0,
@@ -18,7 +18,7 @@ pub const EVENT_ID_COUNT: usize = 3;
 
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum StateId {
     #[default]
     ROOT = 0,
@@ -39,7 +39,7 @@ pub const ON1_SubtreeEndId: i32 = 3;  // State 'ON1' subtree extends from itself
 pub const ON2_SubtreeEndId: i32 = 4;  // State 'ON2' subtree extends from itself (id: 4) to state 'ON2' (id: 4)
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum ON_GROUP_HistoryId {
     #[default]
     ON1 = 0, // default transition

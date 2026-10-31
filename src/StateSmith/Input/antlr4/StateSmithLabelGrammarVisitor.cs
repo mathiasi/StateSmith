@@ -212,6 +212,12 @@ public interface IStateSmithLabelGrammarVisitor<Result> : IParseTreeVisitor<Resu
 	/// <return>The visitor result.</return>
 	Result VisitTriggers([NotNull] StateSmithLabelGrammarParser.TriggersContext context);
 	/// <summary>
+	/// Visit a parse tree produced by <see cref="StateSmithLabelGrammarParser.trigger_call"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	/// <return>The visitor result.</return>
+	Result VisitTrigger_call([NotNull] StateSmithLabelGrammarParser.Trigger_callContext context);
+	/// <summary>
 	/// Visit a parse tree produced by <see cref="StateSmithLabelGrammarParser.trigger_id"/>.
 	/// </summary>
 	/// <param name="context">The parse tree.</param>

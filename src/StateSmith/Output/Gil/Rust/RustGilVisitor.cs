@@ -27,7 +27,7 @@ namespace StateSmith.Output.Gil.Rust;
 public class RustGilVisitor : CSharpSyntaxWalker
 {
     public const string FileAttributes = "#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code, unreachable_code, unused_mut, unused_assignments, unused_variables, unused_parens, clippy::needless_return, clippy::single_match, clippy::upper_case_acronyms)]";
-    public const string EnumDerives = "#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]";
+    public const string EnumDerives = "#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]";
 
     private StringBuilder sb;
     private readonly RenderConfigRustVars renderConfigRust;
@@ -448,7 +448,7 @@ public class RustGilVisitor : CSharpSyntaxWalker
 
         var parts = new List<string>();
         if (!isStatic)
-            parts.Add("&mut self");
+            parts.Add(MutatesSelf(node) ? "&mut self" : "&self");
 
         foreach (var p in node.ParameterList.Parameters)
         {
@@ -465,6 +465,45 @@ public class RustGilVisitor : CSharpSyntaxWalker
 
         VisitTrailingTrivia(node.ParameterList.CloseParenToken);
         Visit(node.Body.ThrowIfNull());
+    }
+
+    /// <summary>
+    /// Conservative: anything that assigns through `this`, calls a method on `this`, or echoes raw user code needs `&amp;mut self`.
+    /// Pure queries (like `next_deadline_ms()`) get `&amp;self`.
+    /// </summary>
+    private bool MutatesSelf(MethodDeclarationSyntax node)
+    {
+        if (node.Body == null)
+            return true;
+
+        static bool RootedAtThis(ExpressionSyntax e)
+        {
+            while (e is MemberAccessExpressionSyntax m)
+                e = m.Expression;
+            return e is ThisExpressionSyntax;
+        }
+
+        foreach (var n in node.Body.DescendantNodes())
+        {
+            switch (n)
+            {
+                case AssignmentExpressionSyntax a when a.Left is not IdentifierNameSyntax || RootedAtThis(a.Left):
+                    if (a.Left is MemberAccessExpressionSyntax || a.Left is not IdentifierNameSyntax)
+                        return true;
+                    break;
+                case PostfixUnaryExpressionSyntax p when p.Operand is MemberAccessExpressionSyntax:
+                case PrefixUnaryExpressionSyntax pre when pre.Operand is MemberAccessExpressionSyntax && !pre.IsKind(SyntaxKind.LogicalNotExpression):
+                    return true;
+                case InvocationExpressionSyntax inv:
+                    if (inv.Expression is MemberAccessExpressionSyntax ma && RootedAtThis(ma))
+                        return true;
+                    if (inv.Expression is IdentifierNameSyntax id && id.Identifier.Text.StartsWith(GilCreationHelper.GilDataPrefix))
+                        return true; // raw user code echo
+                    break;
+            }
+        }
+
+        return false;
     }
 
     private static string RustType(TypeSyntax typeSyntax)

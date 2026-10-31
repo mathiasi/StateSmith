@@ -331,6 +331,16 @@ public interface IStateSmithLabelGrammarListener : IParseTreeListener {
 	/// <param name="context">The parse tree.</param>
 	void ExitTriggers([NotNull] StateSmithLabelGrammarParser.TriggersContext context);
 	/// <summary>
+	/// Enter a parse tree produced by <see cref="StateSmithLabelGrammarParser.trigger_call"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	void EnterTrigger_call([NotNull] StateSmithLabelGrammarParser.Trigger_callContext context);
+	/// <summary>
+	/// Exit a parse tree produced by <see cref="StateSmithLabelGrammarParser.trigger_call"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	void ExitTrigger_call([NotNull] StateSmithLabelGrammarParser.Trigger_callContext context);
+	/// <summary>
 	/// Enter a parse tree produced by <see cref="StateSmithLabelGrammarParser.trigger_id"/>.
 	/// </summary>
 	/// <param name="context">The parse tree.</param>

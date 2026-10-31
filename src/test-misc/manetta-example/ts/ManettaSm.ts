@@ -880,8 +880,8 @@ export class ManettaSm
     private BREWING_do(): void 
     {
         // BREWING behavior
-        // uml: 1. do [start_source == StartSource.APP && after(brew_cmd_max_ms)] / { stop_reason = StopReason.COMMAND_CAP; } TransitionTo(IDLE)
-        if (this.vars.start_source == StartSource.APP && ((((this.vars.now_ms - this.vars.BREWING_entered_at) >>> 0)) >= this.vars.brew_cmd_max_ms))
+        // uml: 1. do [after(brew_cmd_max_ms) && (start_source == StartSource.APP)] / { stop_reason = StopReason.COMMAND_CAP; } TransitionTo(IDLE)
+        if (((((this.vars.now_ms - this.vars.BREWING_entered_at) >>> 0)) >= this.vars.brew_cmd_max_ms) && (this.vars.start_source == StartSource.APP))
         {
             // Step 1: Exit states until we reach `ON` state (Least Common Ancestor for transition).
             this.BREWING_exit();
@@ -1629,5 +1629,74 @@ export class ManettaSm
             case StateId.STEAM_READY: return StateId.STEAM;
             default: return StateId.ROOT;
         }
+    }
+    
+    // Portable code (experimental): milliseconds until the next `after()` / `elapsed()` timer of an active state expires.
+    // Returns 0xFFFFFFFF when no timer is pending. A host can sleep this long, then dispatch the `do` event.
+    // Other guard conditions are ignored, so the host may wake early but never late. Call it again after every dispatch.
+    public nextDeadlineMs(): number 
+    {
+        let best: number = 0xFFFFFFFF;
+        let elapsed: number = 0;
+        let duration: number = 0;
+        
+        // IDLE
+        if (this.stateId == StateId.IDLE)
+        {
+            elapsed = ((this.vars.now_ms - this.vars.auto_off_from) >>> 0);
+            duration = (Math.imul(this.vars.auto_off_min, 60000) >>> 0);
+            if (elapsed < duration && ((duration - elapsed) >>> 0) < best)
+            {
+                best = ((duration - elapsed) >>> 0);
+            }
+        }
+        
+        // BREWING
+        if (this.stateId == StateId.BREWING)
+        {
+            elapsed = ((this.vars.now_ms - this.vars.BREWING_entered_at) >>> 0);
+            duration = this.vars.brew_cmd_max_ms;
+            if (elapsed < duration && ((duration - elapsed) >>> 0) < best)
+            {
+                best = ((duration - elapsed) >>> 0);
+            }
+            elapsed = ((this.vars.now_ms - this.vars.BREWING_entered_at) >>> 0);
+            duration = this.vars.device_max_brew_ms;
+            if (elapsed < duration && ((duration - elapsed) >>> 0) < best)
+            {
+                best = ((duration - elapsed) >>> 0);
+            }
+            elapsed = ((this.vars.now_ms - this.vars.last_write_at) >>> 0);
+            duration = this.vars.heartbeat_timeout_ms;
+            if (elapsed < duration && ((duration - elapsed) >>> 0) < best)
+            {
+                best = ((duration - elapsed) >>> 0);
+            }
+        }
+        
+        // STEAM and its sub states
+        if (this.stateId >= StateId.STEAM && this.stateId <= StateId.STEAM_READY)
+        {
+            elapsed = ((this.vars.now_ms - this.vars.steam_cmd_at) >>> 0);
+            duration = this.vars.steam_cmd_max_ms;
+            if (elapsed < duration && ((duration - elapsed) >>> 0) < best)
+            {
+                best = ((duration - elapsed) >>> 0);
+            }
+            elapsed = ((this.vars.now_ms - this.vars.STEAM_entered_at) >>> 0);
+            duration = this.vars.device_max_steam_ms;
+            if (elapsed < duration && ((duration - elapsed) >>> 0) < best)
+            {
+                best = ((duration - elapsed) >>> 0);
+            }
+            elapsed = ((this.vars.now_ms - this.vars.auto_off_from) >>> 0);
+            duration = (Math.imul(this.vars.auto_off_min, 60000) >>> 0);
+            if (elapsed < duration && ((duration - elapsed) >>> 0) < best)
+            {
+                best = ((duration - elapsed) >>> 0);
+            }
+        }
+        
+        return best;
     }
 }

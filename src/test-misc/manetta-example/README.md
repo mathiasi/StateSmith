@@ -15,9 +15,10 @@ The Rust module also builds as `#![no_std]` for `riscv32imc-unknown-none-elf`.
 |---|---|
 | Same diagram text for both languages | yes, and nothing else: types, variables and code are all in `ManettaSm.plantuml`. The generator only picks the target |
 | Rust trace == TypeScript trace | **identical** (`diff trace-rust.txt trace-ts.txt` is empty; checked by `ManettaExampleGenTests.RustAndTypeScriptTracesMatch`) |
+| Low-power host (`--sleep`: sleep until `next_deadline_ms()` instead of a 100 ms `do` tick) | same trace in both languages, **25 `do` dispatches instead of 2,190** |
 | Rust warnings | 0 rustc and 0 clippy warnings for the runner crate and the no_std crate |
 | TypeScript | `tsc` 6.0 with `strict`, target ES2020: no errors |
-| no_std, `riscv32imc-unknown-none-elf`, `opt-level = "s"` | builds. Whole crate object: **2,084 B `.text`**, 0 data, 0 bss. The only external symbol is `memset` (from `compiler_builtins`) |
+| no_std, `riscv32imc-unknown-none-elf`, `opt-level = "s"` | builds. Whole crate object: **2,394 B `.text`** (including an exported `next_deadline_ms()` call), 0 data, 0 bss. The only external symbol is `memset` (from `compiler_builtins`) |
 
 ## The diagram
 
@@ -78,7 +79,7 @@ All action and guard code is portable code, which StateSmith translates for each
 |---|---|---|
 | `reply = Reply.OK;` | `self.vars.reply = Reply::OK;` | `this.vars.reply = Reply.OK;` |
 | `power != Power.HEATING` | `self.vars.power != Power::HEATING` | `this.vars.power != Power.HEATING` |
-| `after(brew_cmd_max_ms)` (time since BREWING was entered) | `self.vars.now_ms.wrapping_sub(self.vars.BREWING_entered_at) >= self.vars.brew_cmd_max_ms` | `((this.vars.now_ms - this.vars.BREWING_entered_at) >>> 0) >= this.vars.brew_cmd_max_ms` |
+| `after(brew_cmd_max_ms)` trigger (time since BREWING was entered; sugar for `do [after(...)]`) | `self.vars.now_ms.wrapping_sub(self.vars.BREWING_entered_at) >= self.vars.brew_cmd_max_ms` | `((this.vars.now_ms - this.vars.BREWING_entered_at) >>> 0) >= this.vars.brew_cmd_max_ms` |
 | `elapsed(last_write_at)` | `self.vars.now_ms.wrapping_sub(self.vars.last_write_at)` | `((this.vars.now_ms - this.vars.last_write_at) >>> 0)` |
 | `auto_off_min * 60000` | `self.vars.auto_off_min.wrapping_mul(60000)` | `(Math.imul(this.vars.auto_off_min, 60000) >>> 0)` |
 
@@ -86,6 +87,9 @@ How the pieces fit:
 - **Enums** are generated into both outputs from the `Types` declaration: in Rust with `#[repr(u8)]`, derives and `*_COUNT`; in TypeScript as `export enum`.
   The runners import them from the generated module.
 - **`after()`** makes StateSmith add a `BREWING_entered_at` variable and an entry action that stamps it.
+  `BREWING --> IDLE : 1. after(brew_cmd_max_ms) [start_source == StartSource.APP] / ...` is a trigger; it's checked on each `do`.
+- **`next_deadline_ms()`** is generated from those timers. A host can sleep that long instead of ticking `do` every 100 ms.
+  Both runners do this with `--sleep`; the traces stay identical.
 - **Unsigned arithmetic** wraps like the device's u32 counter in both languages.
 - **The generator test** ([`ManettaExampleGenTests.cs`](../../StateSmithTest/Output/Rust/ManettaExampleGenTests.cs)) has no render config, no expansions
   and no variable table. It only chooses the target language and output folder.
@@ -364,11 +368,12 @@ Highlights:
 
 Status on this branch: ✅ fixed by portable code, ◐ partly, ◻ still open (see `/NORTH_STAR.md` for the plan).
 
-1. ◐ **Time is polling, not timers.** Now `after(brew_cmd_max_ms)` records the entry time automatically; it's still a `do` guard, not a trigger.
-   - Was: StateSmith has no `after(25 s)` trigger. Every cap is a guard on the `do` event, re-evaluated each tick, so a cap's resolution is the tick (100 ms here).
+1. ✅ **Time is polling, not timers.** Now `after(brew_cmd_max_ms)` is a trigger that records the entry time itself.
+   `next_deadline_ms()` lets the host sleep between timers (25 `do` dispatches instead of 2,190 in these scenarios).
+   - Was: StateSmith had no `after(25 s)` trigger. Every cap is a guard on the `do` event, re-evaluated each tick, so a cap's resolution is the tick (100 ms here).
    - Was: each one needs its own "started at" timestamp variable, set in an entry action. (`after()` now does this; re-armable timers such as the steam command cap still use a timestamp and `elapsed()`.)
-   - The 30-minute device cap means 18,000 `do` dispatches. That's cheap here, but it also means `do` runs every guard of every active state on every tick.
-   - Which reason is reported when two caps expire on the same tick depends on the `1.` / `2.` ordering numbers. That's a subtle thing to encode in edge labels.
+   - Was: the 30-minute device cap meant 18,000 `do` dispatches, each running every guard of every active state. A polling host still does that; a sleeping host wakes once.
+   - Still true: which reason is reported when two caps expire on the same tick depends on the `1.` / `2.` ordering numbers. That's a subtle thing to encode in edge labels.
 2. ✅ **Wrapping time needs an expansion.** Now built in: `elapsed()` / `after()`, and unsigned math wraps in every language.
    Was: `now_ms - t` would panic on wraparound in debug Rust and is a float in TypeScript, so a hand-written `elapsed()` expansion was needed per language.
 3. ◻ **"Any write counts as a heartbeat" can't be said once in the diagram.** Kept as a host concern on purpose.
@@ -396,7 +401,7 @@ Status on this branch: ✅ fixed by portable code, ◐ partly, ◻ still open (s
 10. ◐ **Naming compromise in Rust.** SCREAMING_CASE enum variants keep the diagram text identical for both languages, at the cost of
     `#![allow(...)]` lints. These now sit in the generated file, where the enums live.
 
-Nothing in the requested scope was impossible to express. The hard parts were ergonomics rather than missing semantics. Portable code removes 2, 7 and 8 and half of 1.
+Nothing in the requested scope was impossible to express. The hard parts were ergonomics rather than missing semantics. Portable code and the time helpers remove 1, 2, 7 and 8.
 
 ## Regenerate and run
 
@@ -418,6 +423,10 @@ cd src/test-misc/manetta-example/ts && tsc -p . && node dist/runner.js > ../trac
 
 ```bash
 cd src/test-misc/manetta-example && diff trace-rust.txt trace-ts.txt && echo identical
+```
+
+```bash
+cd src/test-misc/manetta-example/rust && cargo run -- --sleep | diff - ../trace-rust.txt && echo "sleeping host == polling host"
 ```
 
 ```bash

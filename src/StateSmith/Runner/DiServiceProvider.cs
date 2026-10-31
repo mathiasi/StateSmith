@@ -81,6 +81,7 @@ public class DiServiceProvider : IDisposable
 
             services.AddTransient<HistoryProcessor>();
             services.AddTransient<PortableTimeProcessor>(); // EXPERIMENTAL portable code mode
+            services.AddSingleton<PortableTimers>();
 
             services.AddSingleton<ICodeGenRunner, GilAlgoCodeGen>();
             services.AddSingleton<IGilAlgo, AlgoBalanced1>();

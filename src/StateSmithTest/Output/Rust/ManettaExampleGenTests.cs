@@ -52,15 +52,26 @@ public class ManettaExampleGenTests
     {
         Generate();
 
-        SimpleProcess rust = new() { WorkingDirectory = ExampleDirectory + "rust", ProgramPath = "cargo", Args = "run --quiet" };
+        SimpleProcess rust = new() { WorkingDirectory = ExampleDirectory + "rust", ProgramPath = "cargo", Args = "run --quiet", throwOnStdErr = false }; // runners print `do` dispatch stats on stderr
         rust.Run(timeoutMs: SimpleProcess.DefaultLongTimeoutMs);
 
         SimpleProcess tsc = new() { WorkingDirectory = ExampleDirectory + "ts", ProgramPath = "tsc", Args = "-p ." };
         tsc.Run(timeoutMs: SimpleProcess.DefaultLongTimeoutMs);
-        SimpleProcess node = new() { WorkingDirectory = ExampleDirectory + "ts", ProgramPath = "node", Args = "dist/runner.js" };
+        SimpleProcess node = new() { WorkingDirectory = ExampleDirectory + "ts", ProgramPath = "node", Args = "dist/runner.js", throwOnStdErr = false };
         node.Run(timeoutMs: SimpleProcess.DefaultLongTimeoutMs);
 
         rust.StdOutput.Should().NotBeNullOrWhiteSpace();
         node.StdOutput.Should().Be(rust.StdOutput);
+
+        // A low-power host that sleeps until next_deadline_ms() instead of polling `do` must behave identically.
+        SimpleProcess rustSleep = new() { WorkingDirectory = ExampleDirectory + "rust", ProgramPath = "cargo", Args = "run --quiet -- --sleep", throwOnStdErr = false };
+        rustSleep.Run(timeoutMs: SimpleProcess.DefaultLongTimeoutMs);
+        SimpleProcess nodeSleep = new() { WorkingDirectory = ExampleDirectory + "ts", ProgramPath = "node", Args = "dist/runner.js --sleep", throwOnStdErr = false };
+        nodeSleep.Run(timeoutMs: SimpleProcess.DefaultLongTimeoutMs);
+
+        rustSleep.StdOutput.Should().Be(rust.StdOutput);
+        nodeSleep.StdOutput.Should().Be(rust.StdOutput);
+        rustSleep.StdError.Should().Contain("do dispatches: 25 ");
+        rust.StdError.Should().Contain("do dispatches: 2190 ");
     }
 }

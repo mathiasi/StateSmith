@@ -7,7 +7,7 @@
 use crate::printer::{trace, trace_guard};
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum EventId
 {
     #[default]
@@ -31,7 +31,7 @@ pub const EVENT_ID_COUNT: usize = 15;
 
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum StateId
 {
     #[default]
@@ -391,7 +391,7 @@ pub const UNREACHABLE_SubtreeEndId: i32 = 172;  // State 'UNREACHABLE' subtree e
 pub const USELESS_SubtreeEndId: i32 = 173;  // State 'USELESS' subtree extends from itself (id: 173) to state 'USELESS' (id: 173)
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum T7__H1__ON_HistoryId
 {
     #[default]
@@ -403,7 +403,7 @@ pub const T7__H1__ON_HISTORY_ID_COUNT: usize = 3;
 
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum T7__H1__OFF_HistoryId
 {
     #[default]
@@ -415,7 +415,7 @@ pub const T7__H1__OFF_HISTORY_ID_COUNT: usize = 3;
 
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum T7__DH1__ALIENS_DETECTED_HistoryId
 {
     #[default]
@@ -429,7 +429,7 @@ pub const T7__DH1__ALIENS_DETECTED_HISTORY_ID_COUNT: usize = 5;
 
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum T7__DH1__GET_BACKUP_HistoryId
 {
     #[default]
@@ -442,7 +442,7 @@ pub const T7__DH1__GET_BACKUP_HISTORY_ID_COUNT: usize = 4;
 
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum T7__DH1__BUILD_HistoryId
 {
     #[default]
@@ -461,7 +461,7 @@ pub const T7__DH1__BUILD_HISTORY_ID_COUNT: usize = 10;
 
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum T7__DEEP_HISTORY2__T7__state_0_HistoryId
 {
     #[default]
@@ -474,7 +474,7 @@ pub const T7__DEEP_HISTORY2__T7__STATE_0_HISTORY_ID_COUNT: usize = 4;
 
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum T7__DEEP_HISTORY3__T7__state_0_HistoryId
 {
     #[default]

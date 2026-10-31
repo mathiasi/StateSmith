@@ -42,7 +42,12 @@ function printLine(sm: ManettaSm, step: string, reply: string) {
 }
 
 function main() {
-    const path = process.argv[2] ?? "../scenarios.txt";
+    // `--sleep`: behave like a low-power host. Instead of a `do` tick every 100 ms, sleep until
+    // `nextDeadlineMs()` and dispatch `do` only then. The trace must be identical to polling.
+    const args = process.argv.slice(2);
+    const sleepMode = args.includes("--sleep");
+    const path = args.find(a => a !== "--sleep") ?? "../scenarios.txt";
+    let doDispatches = 0;
     const text: string = fs.readFileSync(path, "utf8");
 
     let sm = new ManettaSm();
@@ -81,9 +86,11 @@ function main() {
                 const ms = Number(rest);
                 let last = snapshot(sm);
                 for (let waited = 0; waited < ms; ) {
-                    waited += TICK_MS;
-                    sm.vars.now_ms = (sm.vars.now_ms + TICK_MS) >>> 0;
+                    const step = sleepMode ? Math.min(sm.nextDeadlineMs(), ms - waited) : TICK_MS;
+                    waited += step;
+                    sm.vars.now_ms = (sm.vars.now_ms + step) >>> 0;
                     sm.dispatchEvent(EventId.DO);
+                    doDispatches++;
                     const now = snapshot(sm);
                     if (now !== last) {
                         printLine(sm, "do", "-");
@@ -97,6 +104,8 @@ function main() {
                 throw new Error(`bad line \`${line}\``);
         }
     }
+
+    console.error(`do dispatches: ${doDispatches} (${sleepMode ? "sleep until nextDeadlineMs()" : "poll every 100 ms"})`);
 }
 
 main();

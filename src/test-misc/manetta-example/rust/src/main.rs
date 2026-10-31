@@ -67,7 +67,11 @@ fn print_line(sm: &ManettaSm, step: &str, reply: &str) {
 }
 
 fn main() {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "../scenarios.txt".to_string());
+    // `--sleep`: behave like a low-power host. Instead of a `do` tick every 100 ms, sleep until
+    // `next_deadline_ms()` and dispatch `do` only then. The trace must be identical to polling.
+    let sleep_mode = std::env::args().any(|a| a == "--sleep");
+    let path = std::env::args().skip(1).find(|a| a != "--sleep").unwrap_or_else(|| "../scenarios.txt".to_string());
+    let mut do_dispatches: u64 = 0;
     let text = std::fs::read_to_string(&path).expect("can't read scenarios file");
 
     let mut sm = ManettaSm::new();
@@ -107,9 +111,11 @@ fn main() {
                 let mut last = snapshot(&sm);
                 let mut waited = 0;
                 while waited < ms {
-                    waited += TICK_MS;
-                    sm.vars.now_ms = sm.vars.now_ms.wrapping_add(TICK_MS);
+                    let step = if sleep_mode { sm.next_deadline_ms().min(ms - waited) } else { TICK_MS };
+                    waited += step;
+                    sm.vars.now_ms = sm.vars.now_ms.wrapping_add(step);
                     sm.dispatch_event(EventId::DO);
+                    do_dispatches += 1;
                     let now = snapshot(&sm);
                     if now != last {
                         print_line(&sm, "do", "-");
@@ -121,4 +127,6 @@ fn main() {
             _ => panic!("bad line `{}`", line),
         }
     }
+
+    eprintln!("do dispatches: {} ({})", do_dispatches, if sleep_mode { "sleep until next_deadline_ms()" } else { "poll every 100 ms" });
 }

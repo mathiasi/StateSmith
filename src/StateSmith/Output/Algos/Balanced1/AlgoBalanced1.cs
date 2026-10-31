@@ -26,6 +26,8 @@ public class AlgoBalanced1 : IGilAlgo
     protected readonly StandardFileHeaderPrinter standardFileHeaderPrinter;
     private readonly GilCreationHelper gilCreationHelper;
     protected readonly RenderConfigPortableVars? portable;
+    protected readonly PortableTimers? portableTimers;
+    protected readonly StateSmith.Input.Expansions.IExpander? expander;
 
     protected StateMachine? _sm;
     protected const string AlgoWikiLink = "https://github.com/StateSmith/StateSmith/wiki/Algorithms";
@@ -34,9 +36,11 @@ public class AlgoBalanced1 : IGilAlgo
 
     protected static string ConstMarker => ""; // todo_low - put in an attribute like [ro] that will end up as `const` for languages that support that
 
-    public AlgoBalanced1(NameMangler mangler, PseudoStateHandlerBuilder pseudoStateHandlerBuilder, EnumBuilder enumBuilder, RenderConfigBaseVars renderConfig, EventHandlerBuilder eventHandlerBuilder, CodeStyleSettings styler, AlgoBalanced1Settings settings, IAlgoEventIdToString algoEventIdToString, IAlgoStateIdToString algoStateIdToString, StandardFileHeaderPrinter standardFileHeaderPrinter, RenderConfigPortableVars? portable = null)
+    public AlgoBalanced1(NameMangler mangler, PseudoStateHandlerBuilder pseudoStateHandlerBuilder, EnumBuilder enumBuilder, RenderConfigBaseVars renderConfig, EventHandlerBuilder eventHandlerBuilder, CodeStyleSettings styler, AlgoBalanced1Settings settings, IAlgoEventIdToString algoEventIdToString, IAlgoStateIdToString algoStateIdToString, StandardFileHeaderPrinter standardFileHeaderPrinter, RenderConfigPortableVars? portable = null, PortableTimers? portableTimers = null, StateSmith.Input.Expansions.IExpander? expander = null)
     {
         this.portable = portable;
+        this.portableTimers = portableTimers;
+        this.expander = expander;
         this.mangler = mangler;
         this.file = new OutputFile(styler, new StringBuilder());
         this.pseudoStateHandlerBuilder = pseudoStateHandlerBuilder;
@@ -147,6 +151,7 @@ public class AlgoBalanced1 : IGilAlgo
 
             OutputTriggerHandlers();
             MaybeOutputAdditionalFunctions();
+            MaybeOutputPortableNextDeadline();
         });
     }
 
@@ -173,6 +178,65 @@ public class AlgoBalanced1 : IGilAlgo
         {
             GetParentIdFunctionGen.Generate(file, Sm, mangler);
         }
+    }
+
+    /// <summary>
+    /// EXPERIMENTAL portable code mode. Emits `next_deadline_ms()`: ms until the next `after()` / `elapsed()` timer of an
+    /// active state expires, so a host can sleep instead of polling `do`.
+    /// </summary>
+    private void MaybeOutputPortableNextDeadline()
+    {
+        if (portable?.IsEnabled != true || portableTimers == null || portableTimers.timers.Count == 0 || expander == null)
+            return;
+
+        string Expand(string code) => StateSmith.Input.Antlr4.ExpandingVisitor.ParseAndExpandCode(expander, code).Trim();
+        string now = Expand(portable.TimeVariable);
+        string stateVar = $"this.{mangler.SmStateIdVarName}";
+        string funcName = mangler is AbstractMangler am ? am.MangleFuncName("next_deadline_ms") : "next_deadline_ms";
+        var subtrees = new SubtreeIdMapper().MapSubtree(Sm);
+
+        file.AppendIndentedLine("// Portable code (experimental): milliseconds until the next `after()` / `elapsed()` timer of an active state expires.");
+        file.AppendIndentedLine("// Returns 0xFFFFFFFF when no timer is pending. A host can sleep this long, then dispatch the `do` event.");
+        file.AppendIndentedLine("// Other guard conditions are ignored, so the host may wake early but never late. Call it again after every dispatch.");
+        file.AppendIndented($"public uint {funcName}()");
+        file.StartCodeBlock();
+        file.AppendIndentedLine("uint best = 0xFFFFFFFF;");
+        file.AppendIndentedLine("uint elapsed = 0;");
+        file.AppendIndentedLine("uint duration = 0;");
+
+        foreach (var group in portableTimers.timers.GroupBy(t => t.state))
+        {
+            NamedVertex state = group.Key;
+            var subtree = subtrees[state];
+            string first = $"{mangler.SmStateEnumType}.{mangler.SmStateEnumValue(state)}";
+            string last = $"{mangler.SmStateEnumType}.{mangler.SmStateEnumValue(subtree.subtreeEndVertex)}";
+            string isActive = subtree.subtreeEndVertex == state ? $"{stateVar} == {first}" : $"{stateVar} >= {first} && {stateVar} <= {last}";
+
+            file.AppendIndentedLine();
+            file.AppendIndentedLine(subtree.subtreeEndVertex == state ? $"// {Vertex.Describe(state)}" : $"// {Vertex.Describe(state)} and its sub states");
+            file.AppendIndented($"if ({isActive})");
+            file.StartCodeBlock();
+            foreach (var timer in group)
+            {
+                string start = Expand(timer.start);
+                string duration = Expand(timer.duration);
+                if (timer.strict)
+                    duration = $"({duration}) + 1";
+
+                file.AppendIndentedLine($"elapsed = {now} - {start};");
+                file.AppendIndentedLine($"duration = {duration};");
+                file.AppendIndented("if (elapsed < duration && duration - elapsed < best)");
+                file.StartCodeBlock();
+                file.AppendIndentedLine("best = duration - elapsed;");
+                file.FinishCodeBlock();
+            }
+            file.FinishCodeBlock();
+        }
+
+        file.AppendIndentedLine();
+        file.AppendIndentedLine("return best;");
+        file.FinishCodeBlock();
+        file.AppendIndentedLine();
     }
 
     internal void OutputStructDefinition()

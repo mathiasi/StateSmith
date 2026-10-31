@@ -32,7 +32,7 @@ public class PortableCodeTests
         IDLE --> LIT : PRESS / presses = presses + 1;
         LIT : enter / light = Light.ON;
         LIT : exit / light = Light.OFF;
-        LIT --> IDLE : do [after(on_ms)]
+        LIT --> IDLE : after(on_ms) [presses < 100]
         LIT --> IDLE : 2. do [elapsed(0) > on_ms * 2]
         @enduml
         """";
@@ -63,6 +63,15 @@ public class PortableCodeTests
         code.Should().Contain("self.vars.LIT_entered_at = self.vars.now_ms;");
         code.Should().Contain("self.vars.now_ms.wrapping_sub(self.vars.LIT_entered_at)) >= self.vars.on_ms");
         code.Should().Contain("self.vars.on_ms.wrapping_mul(2)");
+
+        // `after(on_ms) [presses < 100]` trigger is sugar for `do [after(on_ms) && (presses < 100)]`
+        code.Should().Contain("// uml: do [after(on_ms) && (presses < 100)] TransitionTo(IDLE)");
+
+        // next_deadline_ms(): a pure query over the active state's timers
+        code.Should().Contain("pub fn next_deadline_ms(&self) -> u32");
+        code.Should().Contain("if self.state_id == StateId::LIT");
+        code.Should().Contain("duration = self.vars.on_ms;");
+        code.Should().Contain("duration = (self.vars.on_ms.wrapping_mul(2)).wrapping_add(1);"); // `elapsed(0) > on_ms * 2` is strict, so + 1
     }
 
     [Fact]
@@ -78,6 +87,15 @@ public class PortableCodeTests
         code.Should().Contain("this.vars.LIT_entered_at = this.vars.now_ms;");
         code.Should().Contain("((this.vars.now_ms - this.vars.LIT_entered_at) >>> 0)");
         code.Should().Contain("(Math.imul(this.vars.on_ms, 2) >>> 0)");
+        code.Should().Contain("public nextDeadlineMs(): number");
+    }
+
+    [Fact]
+    public void UnknownTriggerCallIsAnError()
+    {
+        var diagram = Diagram.Replace("after(on_ms) [presses < 100]", "every(on_ms)");
+        var action = () => TestHelper.CaptureCodeGenRunSmRunnerForPlantUmlString(plantUmlText: diagram, codeFileWriter: new CapturingCodeFileWriter(), transpilerId: TranspilerId.Rust);
+        action.Should().Throw<System.Exception>().Which.ToString().Should().Contain("Unsupported trigger `every(on_ms)`");
     }
 
     [Fact]

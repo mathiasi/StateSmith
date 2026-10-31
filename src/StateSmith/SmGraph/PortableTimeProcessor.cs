@@ -28,10 +28,12 @@ public class PortableTimeProcessor
     public const string EnteredAtPostfix = "_entered_at";
 
     private readonly RenderConfigPortableVars portable;
+    private readonly PortableTimers timers;
 
-    public PortableTimeProcessor(RenderConfigPortableVars portable)
+    public PortableTimeProcessor(RenderConfigPortableVars portable, PortableTimers timers)
     {
         this.portable = portable;
+        this.timers = timers;
     }
 
     public void Process(StateMachine sm)
@@ -54,6 +56,9 @@ public class PortableTimeProcessor
                     continue;
 
                 usedTime = true;
+
+                if (vertex is NamedVertex namedState && vertex is not StateMachine)
+                    CollectTimers(namedState, b.guardCode);
 
                 if (ContainsCall(code, AfterFuncName))
                 {
@@ -83,6 +88,72 @@ public class PortableTimeProcessor
     }
 
     public static string EnteredAtVar(NamedVertex state) => state.Name + EnteredAtPostfix;
+
+    /// <summary>
+    /// Finds the timers a guard waits on, for <see cref="PortableTimers"/> (`next_deadline_ms()`):
+    /// `after(X)` and `elapsed(T) >= X` / `elapsed(T) > X`. Other forms are still valid code, just not known deadlines.
+    /// </summary>
+    private void CollectTimers(NamedVertex state, string guard)
+    {
+        foreach (var (arg, _, end) in FindCalls(guard, AfterFuncName))
+        {
+            timers.Add(new PortableTimers.Timer(state, RenderConfigPortableVars.GilVarsPath + EnteredAtVar(state), arg.Trim(), strict: false));
+        }
+
+        foreach (var (arg, _, end) in FindCalls(guard, ElapsedFuncName))
+        {
+            var m = Regex.Match(guard[end..], @"^\s*(>=|>(?![>=]))");
+            if (!m.Success)
+                continue;
+
+            string duration = ReadOperand(guard, end + m.Length);
+            if (duration.Length > 0)
+                timers.Add(new PortableTimers.Timer(state, arg.Trim(), duration, strict: m.Groups[1].Value == ">"));
+        }
+    }
+
+    /// <summary>Reads an expression up to a top-level `&&`, `||`, `?`, `:`, `,`, unbalanced `)` or the end.</summary>
+    private static string ReadOperand(string code, int start)
+    {
+        int depth = 0;
+        int i = start;
+        for (; i < code.Length; i++)
+        {
+            char c = code[i];
+            if (c == '(') depth++;
+            else if (c == ')') { if (depth == 0) break; depth--; }
+            else if (depth == 0 && (c == '?' || c == ':' || c == ',')) break;
+            else if (depth == 0 && i + 1 < code.Length && ((c == '&' && code[i + 1] == '&') || (c == '|' && code[i + 1] == '|'))) break;
+        }
+        return code[start..i].Trim();
+    }
+
+    /// <summary>Returns (argument, call start index, index after the closing paren) for each `funcName(...)` call.</summary>
+    private static IEnumerable<(string arg, int start, int end)> FindCalls(string code, string funcName)
+    {
+        var regex = CallRegex(funcName);
+        int pos = 0;
+        while (true)
+        {
+            var m = regex.Match(code, pos);
+            if (!m.Success)
+                yield break;
+
+            int argStart = m.Index + m.Length;
+            int depth = 1;
+            int i = argStart;
+            for (; i < code.Length && depth > 0; i++)
+            {
+                if (code[i] == '(') depth++;
+                else if (code[i] == ')') depth--;
+            }
+            if (depth != 0)
+                yield break;
+
+            yield return (code[argStart..(i - 1)], m.Index, i);
+            pos = i;
+        }
+    }
 
     /// <summary>
     /// Rewrites `after(x)` and `elapsed(t)` in diagram code into portable (GIL) time math. Called at expansion time.

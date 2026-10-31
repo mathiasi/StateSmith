@@ -262,9 +262,20 @@ order:
 
 
 triggers: 
+    trigger_call
+    |
     trigger_id 
     |
     trigger_list
+    ;
+
+// EXPERIMENTAL (north-star branch). A trigger written like a function call. Currently only `after(ms)`:
+//      `BREWING --> IDLE : after(brew_cmd_max_ms) [guard] / action`
+// A general rule (instead of an `after` keyword) keeps `after` usable as a normal identifier elsewhere.
+trigger_call:
+    ohs
+    permissive_identifier
+    braced_function_args
     ;
 
 trigger_id:

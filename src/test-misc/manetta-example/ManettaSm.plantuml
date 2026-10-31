@@ -13,7 +13,8 @@ skinparam defaultFontSize 13
 ' generator needs is in this file: the types and variables are declared below (in the $CONFIG block),
 ' and all action / guard code is "portable code" that StateSmith translates for each language:
 '   - `reply = Reply.OK;`  `power == Power.READY`  `pump_on = true;`  plain code on declared variables
-'   - `after(ms)`          time since this state was entered (StateSmith records the entry time)
+'   - `after(ms)`          trigger: fires once `ms` have passed since this state was entered
+'                         (StateSmith records the entry time; checked on every `do` tick)
 '   - `elapsed(t)`         time since timestamp `t`
 '   Time math is unsigned and wraps like the device's u32 millisecond counter, in every language.
 '
@@ -138,8 +139,8 @@ BREWING : enter / phase = Phase.BREWING; stop_reason = StopReason.NONE; pump_on 
 BREWING : exit / pump_on = false; phase = Phase.IDLE; auto_off_from = now_ms;
 BREWING : TURN_OFF / reply = Reply.BUSY;
 
-BREWING --> IDLE : 1. do [start_source == StartSource.APP && after(brew_cmd_max_ms)] / stop_reason = StopReason.COMMAND_CAP;
-BREWING --> IDLE : 2. do [after(device_max_brew_ms)] / stop_reason = StopReason.DEVICE_CAP;
+BREWING --> IDLE : 1. after(brew_cmd_max_ms) [start_source == StartSource.APP] / stop_reason = StopReason.COMMAND_CAP;
+BREWING --> IDLE : 2. after(device_max_brew_ms) / stop_reason = StopReason.DEVICE_CAP;
 BREWING --> IDLE : 3. do [start_source == StartSource.APP && elapsed(last_write_at) >= heartbeat_timeout_ms] / stop_reason = StopReason.HEARTBEAT;
 BREWING --> IDLE : STOP_BREW / reply = Reply.OK; stop_reason = StopReason.APP;
 BREWING --> IDLE : MACHINE_BREW_SWITCH_OFF / stop_reason = StopReason.MACHINE;
@@ -161,7 +162,7 @@ STEAM : 2. ENTER_STEAM [cmd_max_ms != 0] / reply = Reply.OK; steam_cmd_max_ms = 
 STEAM --> IDLE : LEAVE_STEAM / reply = Reply.OK;
 STEAM --> IDLE : MACHINE_STEAM_BUTTON
 STEAM --> IDLE : 1. do [elapsed(steam_cmd_at) >= steam_cmd_max_ms]
-STEAM --> IDLE : 2. do [after(device_max_steam_ms)]
+STEAM --> IDLE : 2. after(device_max_steam_ms)
 STEAM --> OFF : 3. do [elapsed(auto_off_from) >= auto_off_min * 60000]
 
 STEAM_HEATING : enter / steam_state = SteamState.HEATING;

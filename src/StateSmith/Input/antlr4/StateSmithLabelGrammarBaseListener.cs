@@ -396,6 +396,18 @@ public partial class StateSmithLabelGrammarBaseListener : IStateSmithLabelGramma
 	/// <param name="context">The parse tree.</param>
 	public virtual void ExitTriggers([NotNull] StateSmithLabelGrammarParser.TriggersContext context) { }
 	/// <summary>
+	/// Enter a parse tree produced by <see cref="StateSmithLabelGrammarParser.trigger_call"/>.
+	/// <para>The default implementation does nothing.</para>
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	public virtual void EnterTrigger_call([NotNull] StateSmithLabelGrammarParser.Trigger_callContext context) { }
+	/// <summary>
+	/// Exit a parse tree produced by <see cref="StateSmithLabelGrammarParser.trigger_call"/>.
+	/// <para>The default implementation does nothing.</para>
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	public virtual void ExitTrigger_call([NotNull] StateSmithLabelGrammarParser.Trigger_callContext context) { }
+	/// <summary>
 	/// Enter a parse tree produced by <see cref="StateSmithLabelGrammarParser.trigger_id"/>.
 	/// <para>The default implementation does nothing.</para>
 	/// </summary>

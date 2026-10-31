@@ -4,7 +4,7 @@
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code, unreachable_code, unused_mut, unused_assignments, unused_variables, unused_parens, clippy::needless_return, clippy::single_match, clippy::upper_case_acronyms)]
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum EventId
 {
     #[default]
@@ -15,7 +15,7 @@ pub const EVENT_ID_COUNT: usize = 2;
 
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum StateId
 {
     #[default]

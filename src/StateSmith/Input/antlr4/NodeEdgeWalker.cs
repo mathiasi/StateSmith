@@ -176,6 +176,26 @@ public class NodeEdgeWalker : StateSmithLabelGrammarBaseListener
         return visitor.stringBuilder.ToString().Trim();
     }
 
+    /// <summary>
+    /// EXPERIMENTAL (north-star). `after(ms) [guard]` is sugar for `do [after(ms) && (guard)]`.
+    /// `after(ms)` is then handled by portable code mode (see PortableTimeProcessor). Because it is polled on the `do`
+    /// event, it is level-triggered: if the guard is false when the time is reached, the transition fires as soon as
+    /// the guard becomes true (UML time events are one-shot).
+    /// </summary>
+    public override void EnterTrigger_call([NotNull] StateSmithLabelGrammarParser.Trigger_callContext context)
+    {
+        string name = context.permissive_identifier().GetText();
+        if (name != "after")
+        {
+            throw new System.ArgumentException($"Unsupported trigger `{context.GetText().Trim()}`. The only function-like trigger is `after(ms)`.");
+        }
+
+        string afterCall = name + context.braced_function_args().GetText();
+        string guard = currentBehavior.guardCode ?? "";
+        currentBehavior.guardCode = guard.Trim().Length == 0 ? afterCall : $"{afterCall} && ({guard.Trim()})";
+        currentBehavior.triggers.Add("do");
+    }
+
     public override void EnterTrigger_id([NotNull] StateSmithLabelGrammarParser.Trigger_idContext context)
     {
         currentBehavior.triggers.Add(context.expandable_identifier().GetText());
