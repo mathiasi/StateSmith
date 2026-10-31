@@ -59,6 +59,15 @@ pub const STEAM_SubtreeEndId: i32 = 8;  // State 'STEAM' subtree extends from it
 pub const STEAM_HEATING_SubtreeEndId: i32 = 7;  // State 'STEAM_HEATING' subtree extends from itself (id: 7) to state 'STEAM_HEATING' (id: 7)
 pub const STEAM_READY_SubtreeEndId: i32 = 8;  // State 'STEAM_READY' subtree extends from itself (id: 8) to state 'STEAM_READY' (id: 8)
 
+// Host: what the state machine calls in the outside world (portable code).
+pub trait ManettaSmHost {
+    fn set_pump(&mut self, on: bool);              // brew pump
+    fn set_power_relay(&mut self, on: bool);       // boiler power relay
+    fn set_steam_heater(&mut self, on: bool);
+    fn power_relay_is_on(&mut self) -> bool;
+}
+
+
 // User types (portable code)
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
@@ -92,7 +101,6 @@ pub struct Vars {
     // ---- inputs written by the host ----
     pub now_ms: u32,                     // monotonic ms, set before every dispatch
     pub last_write_at: u32,              // now_ms of the last BLE write
-    pub cmd_max_ms: u32,                 // argument of START_BREW / ENTER_STEAM
     // ---- device configuration ----
     pub device_max_brew_ms: u32,   // at most 30 min
     pub device_max_steam_ms: u32,   // counts from when steam began
@@ -105,14 +113,12 @@ pub struct Vars {
     pub steam_state: SteamState,
     pub stop_reason: StopReason,
     pub start_source: StartSource,
-    pub pump_on: bool,
-    pub power_relay_on: bool,
-    pub steam_on: bool,
     // ---- internal ----
     pub brew_cmd_max_ms: u32,
     pub steam_cmd_at: u32,               // last ENTER_STEAM (a repeat restarts the command cap)
     pub steam_cmd_max_ms: u32,
     pub auto_off_from: u32,              // later of the last TURN_ON and the end of the last brew
+    pub max_ms: u32, // event data: START_BREW, ENTER_STEAM
 }
 
 impl Vars {
@@ -122,7 +128,6 @@ impl Vars {
             STEAM_entered_at: 0,
             now_ms: 0,
             last_write_at: 0,
-            cmd_max_ms: 0,
             device_max_brew_ms: 1800000,
             device_max_steam_ms: 600000,
             heartbeat_timeout_ms: 10000,
@@ -133,32 +138,34 @@ impl Vars {
             steam_state: SteamState::OFF,
             stop_reason: StopReason::NONE,
             start_source: StartSource::NONE,
-            pump_on: false,
-            power_relay_on: false,
-            steam_on: false,
             brew_cmd_max_ms: 0,
             steam_cmd_at: 0,
             steam_cmd_max_ms: 0,
             auto_off_from: 0,
+            max_ms: 0,
         }
     }
 }
 
 // Generated state machine
-pub struct ManettaSm {
+pub struct ManettaSm<H: ManettaSmHost> {
     // Used internally by state machine. Feel free to inspect, but don't modify.
     pub state_id: StateId,
     
     // Variables. Can be used for inputs, outputs, user variables...
     pub vars: Vars,
+    
+    // Host. Set by the constructor. Diagram code calls its functions.
+    pub host: H,
 }
 
-impl ManettaSm {
+impl<H: ManettaSmHost> ManettaSm<H> {
     // State machine constructor. Must be called before start or dispatch event functions. Not thread safe.
-    pub const fn new() -> Self {
+    pub const fn new(host: H) -> Self {
         Self {
             state_id: StateId::ROOT,
             vars: Vars::new(),
+            host,
         }
     }
     
@@ -367,6 +374,18 @@ impl ManettaSm {
         
     }
     
+    // Dispatches `START_BREW` with its data. Not thread safe.
+    pub fn dispatch_start_brew(&mut self, max_ms: u32) {
+        self.vars.max_ms = max_ms;
+        self.dispatch_event(EventId::START_BREW);
+    }
+    
+    // Dispatches `ENTER_STEAM` with its data. Not thread safe.
+    pub fn dispatch_enter_steam(&mut self, max_ms: u32) {
+        self.vars.max_ms = max_ms;
+        self.dispatch_event(EventId::ENTER_STEAM);
+    }
+    
     // This function is used when StateSmith doesn't know what the active leaf state is at
     // compile time due to sub states or when multiple states need to be exited.
     fn exit_up_to_state_handler(&mut self, desired_state: StateId) {
@@ -500,8 +519,8 @@ impl ManettaSm {
             // ROOT.<ChoicePoint>(AFTER_FAULT) is a pseudo state and cannot have an `enter` trigger.
             
             // ROOT.<ChoicePoint>(AFTER_FAULT) behavior
-            // uml: [power_relay_on] TransitionTo(ON)
-            if self.vars.power_relay_on {
+            // uml: [power_relay_is_on()] TransitionTo(ON)
+            if self.host.power_relay_is_on() {
                 // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition). Already at LCA, no exiting required.
                 
                 // Step 2: Transition action: ``.
@@ -559,10 +578,10 @@ impl ManettaSm {
     }    
     fn fault_turn_off(&mut self) {
         // FAULT behavior
-        // uml: TURN_OFF / { reply = Reply.OK; power_relay_on = false; power = Power.OFF; }
+        // uml: TURN_OFF / { reply = Reply.OK; set_power_relay(false); power = Power.OFF; }
         {
-            // Step 1: execute action `reply = Reply.OK; power_relay_on = false; power = Power.OFF;`
-            self.vars.reply = Reply::OK; self.vars.power_relay_on = false; self.vars.power = Power::OFF;
+            // Step 1: execute action `reply = Reply.OK; set_power_relay(false); power = Power.OFF;`
+            self.vars.reply = Reply::OK; self.host.set_power_relay(false); self.vars.power = Power::OFF;
         } // end of behavior for FAULT
         
         // No ancestor handles this event.
@@ -586,10 +605,10 @@ impl ManettaSm {
         self.state_id = StateId::OFF;
         
         // OFF behavior
-        // uml: enter / { power_relay_on = false; power = Power.OFF; }
+        // uml: enter / { set_power_relay(false); power = Power.OFF; }
         {
-            // Step 1: execute action `power_relay_on = false; power = Power.OFF;`
-            self.vars.power_relay_on = false; self.vars.power = Power::OFF;
+            // Step 1: execute action `set_power_relay(false); power = Power.OFF;`
+            self.host.set_power_relay(false); self.vars.power = Power::OFF;
         } // end of behavior for OFF
     }
     
@@ -675,10 +694,10 @@ impl ManettaSm {
         self.state_id = StateId::ON;
         
         // ON behavior
-        // uml: enter / { power_relay_on = true; power = Power.HEATING; auto_off_from = now_ms; }
+        // uml: enter / { set_power_relay(true); power = Power.HEATING; auto_off_from = now_ms; }
         {
-            // Step 1: execute action `power_relay_on = true; power = Power.HEATING; auto_off_from = now_ms;`
-            self.vars.power_relay_on = true; self.vars.power = Power::HEATING; self.vars.auto_off_from = self.vars.now_ms;
+            // Step 1: execute action `set_power_relay(true); power = Power.HEATING; auto_off_from = now_ms;`
+            self.host.set_power_relay(true); self.vars.power = Power::HEATING; self.vars.auto_off_from = self.vars.now_ms;
         } // end of behavior for ON
     }
     
@@ -815,19 +834,19 @@ impl ManettaSm {
         } // end of behavior for BREWING
         
         // BREWING behavior
-        // uml: enter / { phase = Phase.BREWING; stop_reason = StopReason.NONE; pump_on = true; }
+        // uml: enter / { phase = Phase.BREWING; stop_reason = StopReason.NONE; set_pump(true); }
         {
-            // Step 1: execute action `phase = Phase.BREWING; stop_reason = StopReason.NONE; pump_on = true;`
-            self.vars.phase = Phase::BREWING; self.vars.stop_reason = StopReason::NONE; self.vars.pump_on = true;
+            // Step 1: execute action `phase = Phase.BREWING; stop_reason = StopReason.NONE; set_pump(true);`
+            self.vars.phase = Phase::BREWING; self.vars.stop_reason = StopReason::NONE; self.host.set_pump(true);
         } // end of behavior for BREWING
     }
     
     fn brewing_exit(&mut self) {
         // BREWING behavior
-        // uml: exit / { pump_on = false; phase = Phase.IDLE; auto_off_from = now_ms; }
+        // uml: exit / { set_pump(false); phase = Phase.IDLE; auto_off_from = now_ms; }
         {
-            // Step 1: execute action `pump_on = false; phase = Phase.IDLE; auto_off_from = now_ms;`
-            self.vars.pump_on = false; self.vars.phase = Phase::IDLE; self.vars.auto_off_from = self.vars.now_ms;
+            // Step 1: execute action `set_pump(false); phase = Phase.IDLE; auto_off_from = now_ms;`
+            self.host.set_pump(false); self.vars.phase = Phase::IDLE; self.vars.auto_off_from = self.vars.now_ms;
         } // end of behavior for BREWING
         
         self.state_id = StateId::ON;
@@ -1046,8 +1065,8 @@ impl ManettaSm {
         let mut consume_event: bool = false;
         
         // IDLE behavior
-        // uml: 1. ENTER_STEAM [cmd_max_ms == 0] / { reply = Reply.INVALID; }
-        if self.vars.cmd_max_ms == 0 {
+        // uml: 1. ENTER_STEAM [max_ms == 0] / { reply = Reply.INVALID; }
+        if self.vars.max_ms == 0 {
             // Consume event `enter_steam`.
             consume_event = true;
             // Step 1: execute action `reply = Reply.INVALID;`
@@ -1055,8 +1074,8 @@ impl ManettaSm {
         } // end of behavior for IDLE
         
         // IDLE behavior
-        // uml: 2. ENTER_STEAM [cmd_max_ms != 0 && power == Power.HEATING] / { reply = Reply.NOT_READY; }
-        if self.vars.cmd_max_ms != 0 && self.vars.power == Power::HEATING {
+        // uml: 2. ENTER_STEAM [max_ms != 0 && power == Power.HEATING] / { reply = Reply.NOT_READY; }
+        if self.vars.max_ms != 0 && self.vars.power == Power::HEATING {
             // Consume event `enter_steam`.
             consume_event = true;
             // Step 1: execute action `reply = Reply.NOT_READY;`
@@ -1064,13 +1083,13 @@ impl ManettaSm {
         } // end of behavior for IDLE
         
         // IDLE behavior
-        // uml: 3. ENTER_STEAM [cmd_max_ms != 0 && power != Power.HEATING] / { reply = Reply.OK; steam_cmd_max_ms = cmd_max_ms; } TransitionTo(STEAM)
-        if self.vars.cmd_max_ms != 0 && self.vars.power != Power::HEATING {
+        // uml: 3. ENTER_STEAM [max_ms != 0 && power != Power.HEATING] / { reply = Reply.OK; steam_cmd_max_ms = max_ms; } TransitionTo(STEAM)
+        if self.vars.max_ms != 0 && self.vars.power != Power::HEATING {
             // Step 1: Exit states until we reach `ON` state (Least Common Ancestor for transition).
             self.idle_exit();
             
-            // Step 2: Transition action: `reply = Reply.OK; steam_cmd_max_ms = cmd_max_ms;`.
-            self.vars.reply = Reply::OK; self.vars.steam_cmd_max_ms = self.vars.cmd_max_ms;
+            // Step 2: Transition action: `reply = Reply.OK; steam_cmd_max_ms = max_ms;`.
+            self.vars.reply = Reply::OK; self.vars.steam_cmd_max_ms = self.vars.max_ms;
             
             // Step 3: Enter/move towards transition target `STEAM`.
             self.steam_enter();
@@ -1128,8 +1147,8 @@ impl ManettaSm {
         let mut consume_event: bool = false;
         
         // IDLE behavior
-        // uml: 1. START_BREW [cmd_max_ms == 0] / { reply = Reply.INVALID; }
-        if self.vars.cmd_max_ms == 0 {
+        // uml: 1. START_BREW [max_ms == 0] / { reply = Reply.INVALID; }
+        if self.vars.max_ms == 0 {
             // Consume event `start_brew`.
             consume_event = true;
             // Step 1: execute action `reply = Reply.INVALID;`
@@ -1137,8 +1156,8 @@ impl ManettaSm {
         } // end of behavior for IDLE
         
         // IDLE behavior
-        // uml: 2. START_BREW [cmd_max_ms != 0 && power != Power.READY] / { reply = Reply.NOT_READY; }
-        if self.vars.cmd_max_ms != 0 && self.vars.power != Power::READY {
+        // uml: 2. START_BREW [max_ms != 0 && power != Power.READY] / { reply = Reply.NOT_READY; }
+        if self.vars.max_ms != 0 && self.vars.power != Power::READY {
             // Consume event `start_brew`.
             consume_event = true;
             // Step 1: execute action `reply = Reply.NOT_READY;`
@@ -1146,13 +1165,13 @@ impl ManettaSm {
         } // end of behavior for IDLE
         
         // IDLE behavior
-        // uml: 3. START_BREW [cmd_max_ms != 0 && power == Power.READY] / { reply = Reply.OK; start_source = StartSource.APP; brew_cmd_max_ms = cmd_max_ms; } TransitionTo(BREWING)
-        if self.vars.cmd_max_ms != 0 && self.vars.power == Power::READY {
+        // uml: 3. START_BREW [max_ms != 0 && power == Power.READY] / { reply = Reply.OK; start_source = StartSource.APP; brew_cmd_max_ms = max_ms; } TransitionTo(BREWING)
+        if self.vars.max_ms != 0 && self.vars.power == Power::READY {
             // Step 1: Exit states until we reach `ON` state (Least Common Ancestor for transition).
             self.idle_exit();
             
-            // Step 2: Transition action: `reply = Reply.OK; start_source = StartSource.APP; brew_cmd_max_ms = cmd_max_ms;`.
-            self.vars.reply = Reply::OK; self.vars.start_source = StartSource::APP; self.vars.brew_cmd_max_ms = self.vars.cmd_max_ms;
+            // Step 2: Transition action: `reply = Reply.OK; start_source = StartSource.APP; brew_cmd_max_ms = max_ms;`.
+            self.vars.reply = Reply::OK; self.vars.start_source = StartSource::APP; self.vars.brew_cmd_max_ms = self.vars.max_ms;
             
             // Step 3: Enter/move towards transition target `BREWING`.
             self.brewing_enter();
@@ -1182,19 +1201,19 @@ impl ManettaSm {
         } // end of behavior for STEAM
         
         // STEAM behavior
-        // uml: enter / { steam_on = true; power = Power.ON; steam_cmd_at = now_ms; }
+        // uml: enter / { set_steam_heater(true); power = Power.ON; steam_cmd_at = now_ms; }
         {
-            // Step 1: execute action `steam_on = true; power = Power.ON; steam_cmd_at = now_ms;`
-            self.vars.steam_on = true; self.vars.power = Power::ON; self.vars.steam_cmd_at = self.vars.now_ms;
+            // Step 1: execute action `set_steam_heater(true); power = Power.ON; steam_cmd_at = now_ms;`
+            self.host.set_steam_heater(true); self.vars.power = Power::ON; self.vars.steam_cmd_at = self.vars.now_ms;
         } // end of behavior for STEAM
     }
     
     fn steam_exit(&mut self) {
         // STEAM behavior
-        // uml: exit / { steam_on = false; steam_state = SteamState.OFF; power = Power.COOLING; }
+        // uml: exit / { set_steam_heater(false); steam_state = SteamState.OFF; power = Power.COOLING; }
         {
-            // Step 1: execute action `steam_on = false; steam_state = SteamState.OFF; power = Power.COOLING;`
-            self.vars.steam_on = false; self.vars.steam_state = SteamState::OFF; self.vars.power = Power::COOLING;
+            // Step 1: execute action `set_steam_heater(false); steam_state = SteamState.OFF; power = Power.COOLING;`
+            self.host.set_steam_heater(false); self.vars.steam_state = SteamState::OFF; self.vars.power = Power::COOLING;
         } // end of behavior for STEAM
         
         self.state_id = StateId::ON;
@@ -1252,8 +1271,8 @@ impl ManettaSm {
         let mut consume_event: bool = false;
         
         // STEAM behavior
-        // uml: 1. ENTER_STEAM [cmd_max_ms == 0] / { reply = Reply.INVALID; }
-        if self.vars.cmd_max_ms == 0 {
+        // uml: 1. ENTER_STEAM [max_ms == 0] / { reply = Reply.INVALID; }
+        if self.vars.max_ms == 0 {
             // Consume event `enter_steam`.
             consume_event = true;
             // Step 1: execute action `reply = Reply.INVALID;`
@@ -1261,12 +1280,12 @@ impl ManettaSm {
         } // end of behavior for STEAM
         
         // STEAM behavior
-        // uml: 2. ENTER_STEAM [cmd_max_ms != 0] / { reply = Reply.OK; steam_cmd_max_ms = cmd_max_ms; steam_cmd_at = now_ms; }
-        if self.vars.cmd_max_ms != 0 {
+        // uml: 2. ENTER_STEAM [max_ms != 0] / { reply = Reply.OK; steam_cmd_max_ms = max_ms; steam_cmd_at = now_ms; }
+        if self.vars.max_ms != 0 {
             // Consume event `enter_steam`.
             consume_event = true;
-            // Step 1: execute action `reply = Reply.OK; steam_cmd_max_ms = cmd_max_ms; steam_cmd_at = now_ms;`
-            self.vars.reply = Reply::OK; self.vars.steam_cmd_max_ms = self.vars.cmd_max_ms; self.vars.steam_cmd_at = self.vars.now_ms;
+            // Step 1: execute action `reply = Reply.OK; steam_cmd_max_ms = max_ms; steam_cmd_at = now_ms;`
+            self.vars.reply = Reply::OK; self.vars.steam_cmd_max_ms = self.vars.max_ms; self.vars.steam_cmd_at = self.vars.now_ms;
         } // end of behavior for STEAM
         
         // Check if event has been consumed before calling ancestor handler.
@@ -1443,61 +1462,6 @@ impl ManettaSm {
         self.state_id = StateId::STEAM;
     }
     
-    // Thread safe. This function can be disabled with `outputStateIdToStringFunction` setting.
-    pub const fn state_id_to_string(id: StateId) -> &'static str {
-        match id {
-            StateId::ROOT => { return "ROOT"; }
-            StateId::FAULT => { return "FAULT"; }
-            StateId::OFF => { return "OFF"; }
-            StateId::ON => { return "ON"; }
-            StateId::BREWING => { return "BREWING"; }
-            StateId::IDLE => { return "IDLE"; }
-            StateId::STEAM => { return "STEAM"; }
-            StateId::STEAM_HEATING => { return "STEAM_HEATING"; }
-            StateId::STEAM_READY => { return "STEAM_READY"; }
-        }
-    }
-    
-    // Thread safe. This function can be disabled with `outputEventIdToStringFunction` setting.
-    pub const fn event_id_to_string(id: EventId) -> &'static str {
-        match id {
-            EventId::DO => { return "DO"; }
-            EventId::ENTER_STEAM => { return "ENTER_STEAM"; }
-            EventId::FAULT_CLEARED => { return "FAULT_CLEARED"; }
-            EventId::FAULT_DETECTED => { return "FAULT_DETECTED"; }
-            EventId::LEAVE_STEAM => { return "LEAVE_STEAM"; }
-            EventId::LINK_LOST => { return "LINK_LOST"; }
-            EventId::MACHINE_BREW_SWITCH_OFF => { return "MACHINE_BREW_SWITCH_OFF"; }
-            EventId::MACHINE_BREW_SWITCH_ON => { return "MACHINE_BREW_SWITCH_ON"; }
-            EventId::MACHINE_POWER_SWITCH => { return "MACHINE_POWER_SWITCH"; }
-            EventId::MACHINE_STEAM_BUTTON => { return "MACHINE_STEAM_BUTTON"; }
-            EventId::PING => { return "PING"; }
-            EventId::START_BREW => { return "START_BREW"; }
-            EventId::STOP_BREW => { return "STOP_BREW"; }
-            EventId::TEMP_HEATING => { return "TEMP_HEATING"; }
-            EventId::TEMP_READY => { return "TEMP_READY"; }
-            EventId::TEMP_TOO_HOT => { return "TEMP_TOO_HOT"; }
-            EventId::TURN_OFF => { return "TURN_OFF"; }
-            EventId::TURN_ON => { return "TURN_ON"; }
-        }
-    }
-    
-    // Returns the parent state for a given state. Returns ROOT if input has no parent.
-    // Thread safe. This function can be disabled with `outputGetParentIdFunction` setting.
-    pub const fn get_parent_id(id: StateId) -> StateId {
-        match id {
-            StateId::ROOT => { return StateId::ROOT; }
-            StateId::FAULT => { return StateId::ROOT; }
-            StateId::OFF => { return StateId::ROOT; }
-            StateId::ON => { return StateId::ROOT; }
-            StateId::BREWING => { return StateId::ON; }
-            StateId::IDLE => { return StateId::ON; }
-            StateId::STEAM => { return StateId::ON; }
-            StateId::STEAM_HEATING => { return StateId::STEAM; }
-            StateId::STEAM_READY => { return StateId::STEAM; }
-        }
-    }
-    
     // Portable code (experimental): milliseconds until the next `after()` / `elapsed()` timer of an active state expires.
     // Returns 0xFFFFFFFF when no timer is pending. A host can sleep this long, then dispatch the `do` event.
     // Other guard conditions are ignored, so the host may wake early but never late. Call it again after every dispatch.
@@ -1557,8 +1521,63 @@ impl ManettaSm {
     }
 }
 
-impl Default for ManettaSm {
+// Thread safe. This function can be disabled with `outputStateIdToStringFunction` setting.
+pub const fn state_id_to_string(id: StateId) -> &'static str {
+    match id {
+        StateId::ROOT => { return "ROOT"; }
+        StateId::FAULT => { return "FAULT"; }
+        StateId::OFF => { return "OFF"; }
+        StateId::ON => { return "ON"; }
+        StateId::BREWING => { return "BREWING"; }
+        StateId::IDLE => { return "IDLE"; }
+        StateId::STEAM => { return "STEAM"; }
+        StateId::STEAM_HEATING => { return "STEAM_HEATING"; }
+        StateId::STEAM_READY => { return "STEAM_READY"; }
+    }
+}
+
+// Thread safe. This function can be disabled with `outputEventIdToStringFunction` setting.
+pub const fn event_id_to_string(id: EventId) -> &'static str {
+    match id {
+        EventId::DO => { return "DO"; }
+        EventId::ENTER_STEAM => { return "ENTER_STEAM"; }
+        EventId::FAULT_CLEARED => { return "FAULT_CLEARED"; }
+        EventId::FAULT_DETECTED => { return "FAULT_DETECTED"; }
+        EventId::LEAVE_STEAM => { return "LEAVE_STEAM"; }
+        EventId::LINK_LOST => { return "LINK_LOST"; }
+        EventId::MACHINE_BREW_SWITCH_OFF => { return "MACHINE_BREW_SWITCH_OFF"; }
+        EventId::MACHINE_BREW_SWITCH_ON => { return "MACHINE_BREW_SWITCH_ON"; }
+        EventId::MACHINE_POWER_SWITCH => { return "MACHINE_POWER_SWITCH"; }
+        EventId::MACHINE_STEAM_BUTTON => { return "MACHINE_STEAM_BUTTON"; }
+        EventId::PING => { return "PING"; }
+        EventId::START_BREW => { return "START_BREW"; }
+        EventId::STOP_BREW => { return "STOP_BREW"; }
+        EventId::TEMP_HEATING => { return "TEMP_HEATING"; }
+        EventId::TEMP_READY => { return "TEMP_READY"; }
+        EventId::TEMP_TOO_HOT => { return "TEMP_TOO_HOT"; }
+        EventId::TURN_OFF => { return "TURN_OFF"; }
+        EventId::TURN_ON => { return "TURN_ON"; }
+    }
+}
+
+// Returns the parent state for a given state. Returns ROOT if input has no parent.
+// Thread safe. This function can be disabled with `outputGetParentIdFunction` setting.
+pub const fn get_parent_id(id: StateId) -> StateId {
+    match id {
+        StateId::ROOT => { return StateId::ROOT; }
+        StateId::FAULT => { return StateId::ROOT; }
+        StateId::OFF => { return StateId::ROOT; }
+        StateId::ON => { return StateId::ROOT; }
+        StateId::BREWING => { return StateId::ON; }
+        StateId::IDLE => { return StateId::ON; }
+        StateId::STEAM => { return StateId::ON; }
+        StateId::STEAM_HEATING => { return StateId::STEAM; }
+        StateId::STEAM_READY => { return StateId::STEAM; }
+    }
+}
+
+impl<H: ManettaSmHost + Default> Default for ManettaSm<H> {
     fn default() -> Self {
-        Self::new()
+        Self::new(H::default())
     }
 }

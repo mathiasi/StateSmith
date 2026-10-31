@@ -155,3 +155,96 @@ public class PlantUmlRootBehaviorTests
         code.Should().NotContain("ROOTSM"); // no separate state named after the machine
     }
 }
+
+/// <summary>
+/// EXPERIMENTAL portable code mode, P3: host functions (Rust trait / TS interface) and typed event payloads.
+/// </summary>
+public class PortableHostAndPayloadTests
+{
+    private const string Diagram = """"
+        @startuml DoorSm
+
+        /'! $CONFIG : toml
+        [RenderConfig.Portable]
+        Functions = """
+        void set_lock(bool locked);
+        bool door_closed();
+        """
+        Events = """
+        UNLOCK(uint code)
+        """
+        Variables = """
+        uint secret = 1234;
+        """
+        '/
+
+        [*] --> LOCKED
+        LOCKED : enter / set_lock(true);
+        LOCKED --> UNLOCKED : UNLOCK [code == secret]
+        UNLOCKED : enter / set_lock(false);
+        UNLOCKED --> LOCKED : LOCK [door_closed()]
+        @enduml
+        """";
+
+    private static string Generate(TranspilerId transpilerId, string fileName, string? diagram = null)
+    {
+        var fakeFs = new CapturingCodeFileWriter();
+        TestHelper.CaptureCodeGenRunSmRunnerForPlantUmlString(plantUmlText: diagram ?? Diagram, codeFileWriter: fakeFs, transpilerId: transpilerId);
+        return fakeFs.GetSoleCaptureWithName(fileName).code;
+    }
+
+    [Fact]
+    public void Rust()
+    {
+        var code = Generate(TranspilerId.Rust, "door_sm.rs");
+
+        // host: a trait the state machine is generic over, owned by the machine
+        code.Should().Contain("pub trait DoorSmHost");
+        code.Should().Contain("fn set_lock(&mut self, locked: bool);");
+        code.Should().Contain("fn door_closed(&mut self) -> bool;");
+        code.Should().Contain("pub struct DoorSm<H: DoorSmHost>");
+        code.Should().Contain("pub host: H,");
+        code.Should().Contain("impl<H: DoorSmHost> DoorSm<H>");
+        code.Should().Contain("pub const fn new(host: H) -> Self");
+        code.Should().Contain("self.host.set_lock(true);");
+        code.Should().Contain("self.host.door_closed()");
+        code.Should().Contain("impl<H: DoorSmHost + Default> Default for DoorSm<H>");
+
+        // static helpers become module functions (no type argument needed)
+        code.Should().Contain("\npub const fn state_id_to_string(id: StateId) -> &'static str");
+
+        // typed event payload
+        code.Should().Contain("pub code: u32, // event data: UNLOCK");
+        code.Should().Contain("pub fn dispatch_unlock(&mut self, code: u32)");
+        code.Should().Contain("self.vars.code == self.vars.secret");
+    }
+
+    [Fact]
+    public void TypeScript()
+    {
+        var code = Generate(TranspilerId.TypeScript, "DoorSm.ts");
+
+        code.Should().Contain("export interface DoorSmHost");
+        code.Should().Contain("set_lock(locked: boolean): void;");
+        code.Should().Contain("door_closed(): boolean;");
+        code.Should().Contain("constructor(host: DoorSmHost)");
+        code.Should().Contain("this.host.set_lock(true);");
+        code.Should().Contain("public dispatchUnlock(code: number): void");
+    }
+
+    [Fact]
+    public void DeclaredEventMustBeUsed()
+    {
+        var diagram = Diagram.Replace("UNLOCK(uint code)", "UNLOCK(uint code)\nRESET(uint why)");
+        var action = () => Generate(TranspilerId.Rust, "door_sm.rs", diagram);
+        action.Should().Throw<System.Exception>().Which.ToString().Should().Contain("Event `RESET` is declared");
+    }
+
+    [Fact]
+    public void SameArgumentNameNeedsSameType()
+    {
+        var diagram = Diagram.Replace("UNLOCK(uint code)", "UNLOCK(uint code)\nLOCK(bool code)");
+        var action = () => Generate(TranspilerId.Rust, "door_sm.rs", diagram);
+        action.Should().Throw<System.Exception>().Which.ToString().Should().Contain("declared as both `uint` and `bool`");
+    }
+}

@@ -41,6 +41,18 @@ public class RustGilVisitor : CSharpSyntaxWalker
     private INamedTypeSymbol? smClassSymbol;
 
     /// <summary>
+    /// Portable code host (P3): when the state machine has a field of an interface type (the host), the Rust struct becomes
+    /// generic over it: `pub struct Sm<H: SmHost> { ..., pub host: H }`. Static GIL methods then become module level functions,
+    /// because `Sm::state_id_to_string(..)` would need a type argument for `H`.
+    /// </summary>
+    private string? hostTraitName;
+    private bool SmIsGeneric => hostTraitName != null;
+    private string SmGenericParams => SmIsGeneric ? $"<H: {hostTraitName}>" : "";
+    private string SmTypeArgs => SmIsGeneric ? "<H>" : "";
+
+    private bool IsHostType(ITypeSymbol? type) => type?.TypeKind == TypeKind.Interface;
+
+    /// <summary>
     /// Set to false if any field initializer can't be evaluated in a `const fn`.
     /// </summary>
     private bool ctorCanBeConst = true;
@@ -88,6 +100,10 @@ public class RustGilVisitor : CSharpSyntaxWalker
         smClassSymbol = model.GetDeclaredSymbol(node).ThrowIfNull();
         string smName = node.Identifier.Text;
 
+        var hostField = node.Members.OfType<FieldDeclarationSyntax>().FirstOrDefault(f => IsHostType(model.GetTypeInfo(f.Declaration.Type).Type));
+        if (hostField != null)
+            hostTraitName = model.GetTypeInfo(hostField.Declaration.Type).Type.ThrowIfNull().Name;
+
         // leading trivia of class (like `// Generated state machine`)
         string classLeadingTrivia = Capture(() => VisitLeadingTrivia(node.GetFirstToken()));
 
@@ -101,6 +117,9 @@ public class RustGilVisitor : CSharpSyntaxWalker
                     {
                         case EnumDeclarationSyntax:
                             Visit(member);
+                            break;
+                        case InterfaceDeclarationSyntax iface:
+                            EmitTrait(iface);
                             break;
                         case StructDeclarationSyntax:
                         case ClassDeclarationSyntax:
@@ -118,7 +137,7 @@ public class RustGilVisitor : CSharpSyntaxWalker
         // state machine struct
         var fieldInits = new List<(string name, string init)>();
         sb.Append(classLeadingTrivia.TrimStart('\r', '\n'));
-        sb.Append($"pub struct {smName}");
+        sb.Append($"pub struct {smName}{SmGenericParams}");
         OpenBrace("");
         sb.Append(TrimLeadingBlankLines(Capture(() =>
         {
@@ -131,7 +150,7 @@ public class RustGilVisitor : CSharpSyntaxWalker
         sb.AppendLine();
 
         // impl block
-        sb.Append($"impl {smName}");
+        sb.Append($"impl{SmGenericParams} {smName}{SmTypeArgs}");
         OpenBrace("");
 
         if (!string.IsNullOrWhiteSpace(renderConfigRust.ImplCode))
@@ -143,7 +162,9 @@ public class RustGilVisitor : CSharpSyntaxWalker
         var ctor = node.Members.OfType<ConstructorDeclarationSyntax>().SingleOrDefault();
         sb.Append(TrimLeadingBlankLines(Capture(() => EmitConstructor(ctor, fieldInits))));
 
-        foreach (var member in node.Members.Where(m => m is MethodDeclarationSyntax))
+        bool IsStatic(MemberDeclarationSyntax m) => m.Modifiers.Any(SyntaxKind.StaticKeyword);
+
+        foreach (var member in node.Members.Where(m => m is MethodDeclarationSyntax && !(SmIsGeneric && IsStatic(m))))
         {
             Visit(member);
         }
@@ -151,18 +172,74 @@ public class RustGilVisitor : CSharpSyntaxWalker
         sb.AppendLine("}");
         sb.AppendLine();
 
-        EmitDefaultImpl(smName);
+        if (SmIsGeneric)
+        {
+            // static helpers as module level functions (no type argument needed to call them)
+            string statics = Capture(() =>
+            {
+                foreach (var member in node.Members.Where(m => m is MethodDeclarationSyntax && IsStatic(m)))
+                    Visit(member);
+            });
+            statics = TrimLeadingBlankLines(StringUtils.DeIndent(statics)).TrimEnd();
+            if (statics.Length > 0)
+            {
+                sb.AppendLine(statics);
+                sb.AppendLine();
+            }
+        }
+
+        EmitDefaultImpl(smName, ctor);
+    }
+
+    /// <summary>
+    /// GIL `interface SmHost { void set_pump(bool on); }` to `pub trait SmHost { fn set_pump(&amp;mut self, on: bool); }`.
+    /// Every method takes `&amp;mut self`: on embedded targets even reads (a GPIO, a sensor) usually need it.
+    /// </summary>
+    private void EmitTrait(InterfaceDeclarationSyntax node)
+    {
+        VisitLeadingTrivia(node.GetFirstToken());
+        string indent = StringUtils.FindLastIndent(sb);
+        sb.Append($"pub trait {node.Identifier.Text}");
+        OpenBrace(indent);
+
+        foreach (var m in node.Members.OfType<MethodDeclarationSyntax>())
+        {
+            VisitLeadingTrivia(m.GetFirstToken());
+            var parts = new List<string> { "&mut self" };
+            parts.AddRange(m.ParameterList.Parameters.Select(p => $"{p.Identifier.Text}: {RustType(p.Type.ThrowIfNull())}"));
+            string ret = RustType(m.ReturnType);
+            sb.Append($"fn {m.Identifier.Text}({string.Join(", ", parts)})");
+            if (ret.Length > 0)
+                sb.Append(" -> " + ret);
+            sb.Append(';');
+            VisitTrailingTrivia(m.GetLastToken());
+        }
+
+        sb.AppendLine(indent + "}");
+        sb.AppendLine();
     }
 
     private static string TrimLeadingBlankLines(string code) => Regex.Replace(code, @"^([ \t]*\r?\n)+", "");
 
-    private void EmitDefaultImpl(string typeName)
+    private void EmitDefaultImpl(string typeName, ConstructorDeclarationSyntax? ctor)
     {
-        sb.Append($"impl Default for {typeName}");
+        string newArgs = "";
+        if (SmIsGeneric)
+        {
+            // only when the host is the one constructor argument: `Sm::<MockHost>::default()` is handy in tests
+            if (ctor == null || ctor.ParameterList.Parameters.Count != 1)
+                return;
+            sb.Append($"impl<H: {hostTraitName} + Default> Default for {typeName}<H>");
+            newArgs = "H::default()";
+        }
+        else
+        {
+            sb.Append($"impl Default for {typeName}");
+        }
         OpenBrace("");
         sb.Append($"{Indent1}fn default() -> Self");
         OpenBrace(Indent1);
-        sb.AppendLine($"{Indent1}{Indent1}Self::new()");
+        sb.AppendLine($"{Indent1}{Indent1}Self::new({newArgs})");
         sb.AppendLine($"{Indent1}}}");
         sb.AppendLine("}");
     }
@@ -185,12 +262,28 @@ public class RustGilVisitor : CSharpSyntaxWalker
 
     private void EmitConstructor(ConstructorDeclarationSyntax? ctor, List<(string name, string init)> fieldInits)
     {
+        var ctorParams = new List<string>();
         if (ctor != null)
         {
-            if (ctor.ParameterList.Parameters.Any())
-                throw new NotImplementedException("Rust transpiler: constructors with parameters are not supported.");
-            if (ctor.Body != null && ctor.Body.Statements.Any())
-                throw new NotImplementedException("Rust transpiler: constructors with statements are not supported (spike).");
+            foreach (var p in ctor.ParameterList.Parameters)
+            {
+                var type = model.GetTypeInfo(p.Type.ThrowIfNull()).Type;
+                ctorParams.Add($"{p.Identifier.Text}: {(IsHostType(type) ? "H" : RustType(p.Type))}");
+            }
+
+            // only `this.field = parameter;` statements are supported: they become field initializers
+            foreach (var statement in ctor.Body?.Statements ?? default)
+            {
+                if (statement is ExpressionStatementSyntax { Expression: AssignmentExpressionSyntax { Left: MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax } left, Right: IdentifierNameSyntax right } })
+                {
+                    fieldInits.RemoveAll(f => f.name == left.Name.Identifier.Text);
+                    fieldInits.Add((left.Name.Identifier.Text, right.Identifier.Text));
+                }
+                else
+                {
+                    throw new NotImplementedException($"Rust transpiler: unsupported constructor statement `{statement}`. Only `this.field = parameter;` is supported.");
+                }
+            }
 
             VisitLeadingTrivia(ctor.GetFirstToken());
         }
@@ -200,13 +293,13 @@ public class RustGilVisitor : CSharpSyntaxWalker
         }
 
         string constText = ctorCanBeConst ? "const " : "";
-        sb.Append($"pub {constText}fn new() -> Self");
+        sb.Append($"pub {constText}fn new({string.Join(", ", ctorParams)}) -> Self");
         OpenBrace(Indent1);
         sb.Append($"{Indent1}{Indent1}Self");
         OpenBrace(Indent1 + Indent1);
         foreach (var (name, init) in fieldInits)
         {
-            sb.AppendLine($"{Indent1}{Indent1}{Indent1}{name}: {init},");
+            sb.AppendLine(name == init ? $"{Indent1}{Indent1}{Indent1}{name}," : $"{Indent1}{Indent1}{Indent1}{name}: {init},");
         }
         sb.AppendLine($"{Indent1}{Indent1}}}");
         sb.AppendLine($"{Indent1}}}");
@@ -303,6 +396,14 @@ public class RustGilVisitor : CSharpSyntaxWalker
         sb.Append(isPublic ? "pub " : "");
         sb.Append(name);
         sb.Append(": ");
+
+        if (IsHostType(model.GetTypeInfo(field.Declaration.Type).Type))
+        {
+            sb.Append("H,"); // generic host; initialized from the constructor parameter
+            VisitTrailingTrivia(field.GetLastToken());
+            return;
+        }
+
         sb.Append(RustType(field.Declaration.Type));
         sb.Append(',');
         VisitTrailingTrivia(field.GetLastToken());
@@ -864,6 +965,11 @@ public class RustGilVisitor : CSharpSyntaxWalker
             else if (SymbolEqualityComparer.Default.Equals(leftSymbol, smClassSymbol))
             {
                 VisitLeadingTrivia(node.GetFirstToken());
+                if (SmIsGeneric)
+                {
+                    Visit(node.Name); // static helpers are module level functions
+                    return;
+                }
                 sb.Append("Self");
             }
             else
@@ -890,7 +996,7 @@ public class RustGilVisitor : CSharpSyntaxWalker
                 if (symbol is IMethodSymbol { IsStatic: true })
                 {
                     VisitLeadingTrivia(node.GetFirstToken());
-                    sb.Append("Self::" + node.Identifier.Text);
+                    sb.Append((SmIsGeneric ? "" : "Self::") + node.Identifier.Text);
                     VisitTrailingTrivia(node.GetLastToken());
                     return;
                 }

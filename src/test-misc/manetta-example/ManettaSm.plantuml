@@ -10,16 +10,18 @@ skinparam defaultFontSize 13
 ' Cut-down Manetta espresso machine controller (device side). NORTH STAR version: portable code.
 '
 ' ONE diagram generates both Rust (board, no_std) and TypeScript (iPad app). Everything the
-' generator needs is in this file: the types and variables are declared below (in the $CONFIG block),
+' generator needs is in this file: the types, variables and host functions are declared below (in the $CONFIG block),
 ' and all action / guard code is "portable code" that StateSmith translates for each language:
-'   - `reply = Reply.OK;`  `power == Power.READY`  `pump_on = true;`  plain code on declared variables
+'   - `reply = Reply.OK;`  `power == Power.READY`   plain code on declared variables
+'   - `set_pump(true);`    calls a declared host function (Rust: trait the machine is generic over; TS: interface)
 '   - `after(ms)`          trigger: fires once `ms` have passed since this state was entered
 '                         (StateSmith records the entry time; checked on every `do` tick)
 '   - `elapsed(t)`         time since timestamp `t`
 '   Time math is unsigned and wraps like the device's u32 millisecond counter, in every language.
 '
 ' Host contract: set `now_ms` and dispatch `do` every 100 ms tick; set `last_write_at = now_ms` on
-' every BLE write (any write is a heartbeat); write command arguments (`cmd_max_ms`) before dispatching.
+' every BLE write (any write is a heartbeat). Commands with data use the generated typed dispatchers,
+' e.g. `dispatch_start_brew(max_ms)`, and diagram code reads the argument as `max_ms`.
 '
 ' Parallel concerns are variables + guards (StateSmith has no regions):
 '   temperature  -> `power` (HEATING / READY / COOLING), updated by TEMP_* events in ON
@@ -39,11 +41,20 @@ enum SteamState { OFF, HEATING, READY }
 enum StopReason { NONE, APP, MACHINE, COMMAND_CAP, DEVICE_CAP, LINK_LOST, HEARTBEAT, FAULT }
 enum StartSource { NONE, APP, MACHINE }
 """
+Functions = """
+void set_pump(bool on);              // brew pump
+void set_power_relay(bool on);       // boiler power relay
+void set_steam_heater(bool on);
+bool power_relay_is_on();
+"""
+Events = """
+START_BREW(uint max_ms)              // command cap for this brew
+ENTER_STEAM(uint max_ms)             // command cap for this steam session
+"""
 Variables = """
 // ---- inputs written by the host ----
 uint now_ms = 0;                     // monotonic ms, set before every dispatch
 uint last_write_at = 0;              // now_ms of the last BLE write
-uint cmd_max_ms = 0;                 // argument of START_BREW / ENTER_STEAM
 // ---- device configuration ----
 uint device_max_brew_ms = 1800000;   // at most 30 min
 uint device_max_steam_ms = 600000;   // counts from when steam began
@@ -56,9 +67,6 @@ Power power = Power.OFF;
 SteamState steam_state = SteamState.OFF;
 StopReason stop_reason = StopReason.NONE;
 StartSource start_source = StartSource.NONE;
-bool pump_on = false;
-bool power_relay_on = false;
-bool steam_on = false;
 // ---- internal ----
 uint brew_cmd_max_ms = 0;
 uint steam_cmd_at = 0;               // last ENTER_STEAM (a repeat restarts the command cap)
@@ -93,7 +101,7 @@ ManettaSm --> FAULT : FAULT_DETECTED
 
 ' ////////////////////////////// OFF //////////////////////////////
 
-OFF : enter / power_relay_on = false; power = Power.OFF;
+OFF : enter / set_power_relay(false); power = Power.OFF;
 OFF : TURN_OFF / reply = Reply.OK;
 OFF : (START_BREW, ENTER_STEAM) / reply = Reply.NOT_READY;
 OFF --> ON : TURN_ON / reply = Reply.OK;
@@ -102,7 +110,7 @@ OFF --> ON : MACHINE_POWER_SWITCH
 ' ////////////////////////////// ON //////////////////////////////
 ' Default answers while on. Children override them.
 
-ON : enter / power_relay_on = true; power = Power.HEATING; auto_off_from = now_ms;
+ON : enter / set_power_relay(true); power = Power.HEATING; auto_off_from = now_ms;
 ON : TURN_ON / reply = Reply.OK; auto_off_from = now_ms;
 ON : (START_BREW, ENTER_STEAM) / reply = Reply.BUSY;
 ON : TEMP_HEATING / power = Power.HEATING;
@@ -116,22 +124,22 @@ ON --> OFF : MACHINE_POWER_SWITCH
 ' Brewing needs READY. Heating and cooling (after steam) both answer NOT_READY.
 ' Steam is allowed while READY or COOLING, not while still HEATING after turn-on.
 
-IDLE : 1. START_BREW [cmd_max_ms == 0] / reply = Reply.INVALID;
-IDLE : 2. START_BREW [cmd_max_ms != 0 && power != Power.READY] / reply = Reply.NOT_READY;
-IDLE --> BREWING : 3. START_BREW [cmd_max_ms != 0 && power == Power.READY] / reply = Reply.OK; start_source = StartSource.APP; brew_cmd_max_ms = cmd_max_ms;
+IDLE : 1. START_BREW [max_ms == 0] / reply = Reply.INVALID;
+IDLE : 2. START_BREW [max_ms != 0 && power != Power.READY] / reply = Reply.NOT_READY;
+IDLE --> BREWING : 3. START_BREW [max_ms != 0 && power == Power.READY] / reply = Reply.OK; start_source = StartSource.APP; brew_cmd_max_ms = max_ms;
 IDLE --> BREWING : MACHINE_BREW_SWITCH_ON / start_source = StartSource.MACHINE;
 
-IDLE : 1. ENTER_STEAM [cmd_max_ms == 0] / reply = Reply.INVALID;
-IDLE : 2. ENTER_STEAM [cmd_max_ms != 0 && power == Power.HEATING] / reply = Reply.NOT_READY;
-IDLE --> STEAM : 3. ENTER_STEAM [cmd_max_ms != 0 && power != Power.HEATING] / reply = Reply.OK; steam_cmd_max_ms = cmd_max_ms;
+IDLE : 1. ENTER_STEAM [max_ms == 0] / reply = Reply.INVALID;
+IDLE : 2. ENTER_STEAM [max_ms != 0 && power == Power.HEATING] / reply = Reply.NOT_READY;
+IDLE --> STEAM : 3. ENTER_STEAM [max_ms != 0 && power != Power.HEATING] / reply = Reply.OK; steam_cmd_max_ms = max_ms;
 IDLE --> STEAM : MACHINE_STEAM_BUTTON [power != Power.HEATING] / steam_cmd_max_ms = device_max_steam_ms;
 
 IDLE --> OFF : do [elapsed(auto_off_from) >= auto_off_min * 60000]
 
 ' ////////////////////////////// BREWING //////////////////////////////
 
-BREWING : enter / phase = Phase.BREWING; stop_reason = StopReason.NONE; pump_on = true;
-BREWING : exit / pump_on = false; phase = Phase.IDLE; auto_off_from = now_ms;
+BREWING : enter / phase = Phase.BREWING; stop_reason = StopReason.NONE; set_pump(true);
+BREWING : exit / set_pump(false); phase = Phase.IDLE; auto_off_from = now_ms;
 BREWING : TURN_OFF / reply = Reply.BUSY;
 
 BREWING --> IDLE : 1. after(brew_cmd_max_ms) [start_source == StartSource.APP] / stop_reason = StopReason.COMMAND_CAP;
@@ -148,11 +156,11 @@ BREWING --> FAULT : FAULT_DETECTED / stop_reason = StopReason.FAULT;
 ' brew temperature events are ignored. Leaving steam means the boiler must cool.
 ' LINK_LOST is deliberately not handled: steam survives a lost link.
 
-STEAM : enter / steam_on = true; power = Power.ON; steam_cmd_at = now_ms;
-STEAM : exit / steam_on = false; steam_state = SteamState.OFF; power = Power.COOLING;
+STEAM : enter / set_steam_heater(true); power = Power.ON; steam_cmd_at = now_ms;
+STEAM : exit / set_steam_heater(false); steam_state = SteamState.OFF; power = Power.COOLING;
 STEAM : (TEMP_HEATING, TEMP_READY, TEMP_TOO_HOT)
-STEAM : 1. ENTER_STEAM [cmd_max_ms == 0] / reply = Reply.INVALID;
-STEAM : 2. ENTER_STEAM [cmd_max_ms != 0] / reply = Reply.OK; steam_cmd_max_ms = cmd_max_ms; steam_cmd_at = now_ms;
+STEAM : 1. ENTER_STEAM [max_ms == 0] / reply = Reply.INVALID;
+STEAM : 2. ENTER_STEAM [max_ms != 0] / reply = Reply.OK; steam_cmd_max_ms = max_ms; steam_cmd_at = now_ms;
 
 STEAM --> IDLE : LEAVE_STEAM / reply = Reply.OK;
 STEAM --> IDLE : MACHINE_STEAM_BUTTON
@@ -171,10 +179,10 @@ STEAM_READY : enter / steam_state = SteamState.READY;
 FAULT : enter / phase = Phase.FAULT;
 FAULT : exit / phase = Phase.IDLE;
 FAULT : (TURN_ON, START_BREW, ENTER_STEAM) / reply = Reply.FAULT;
-FAULT : TURN_OFF / reply = Reply.OK; power_relay_on = false; power = Power.OFF;
+FAULT : TURN_OFF / reply = Reply.OK; set_power_relay(false); power = Power.OFF;
 FAULT : FAULT_DETECTED
 FAULT --> AFTER_FAULT : FAULT_CLEARED
-AFTER_FAULT --> ON : [power_relay_on]
+AFTER_FAULT --> ON : [power_relay_is_on()]
 AFTER_FAULT --> OFF : else
 
 @enduml

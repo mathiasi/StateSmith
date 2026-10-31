@@ -3,13 +3,59 @@
 #[path = "../../rust/src/manetta_sm.rs"]
 mod manetta_sm;
 
-use manetta_sm::{EventId, ManettaSm, EVENT_ID_COUNT};
+use manetta_sm::{EventId, ManettaSm, ManettaSmHost, EVENT_ID_COUNT};
 
-/// `const fn new()`: the machine can be built at compile time (e.g. inside a `static` behind a critical-section Mutex).
-static INITIAL: ManettaSm = ManettaSm::new();
+/// The board's host: what the diagram's `set_pump(true)` etc. do on the hardware.
+/// Stand-in for a GPIO output register; a real board would write the register (or an embedded-hal pin) here.
+pub struct BoardHost {
+    pub gpio_out: u32,
+}
 
-/// Board-side shape of the integration: the firmware owns one machine, writes inputs into `vars`,
-/// dispatches an event, then reads the outputs (reply, relays, status fields).
+const PUMP: u32 = 1 << 0;
+const POWER_RELAY: u32 = 1 << 1;
+const STEAM_HEATER: u32 = 1 << 2;
+
+impl BoardHost {
+    pub const fn new() -> Self {
+        Self { gpio_out: 0 }
+    }
+
+    fn set(&mut self, bit: u32, on: bool) {
+        if on {
+            self.gpio_out |= bit;
+        } else {
+            self.gpio_out &= !bit;
+        }
+    }
+}
+
+impl Default for BoardHost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ManettaSmHost for BoardHost {
+    fn set_pump(&mut self, on: bool) {
+        self.set(PUMP, on)
+    }
+    fn set_power_relay(&mut self, on: bool) {
+        self.set(POWER_RELAY, on)
+    }
+    fn set_steam_heater(&mut self, on: bool) {
+        self.set(STEAM_HEATER, on)
+    }
+    fn power_relay_is_on(&mut self) -> bool {
+        self.gpio_out & POWER_RELAY != 0
+    }
+}
+
+/// `const fn new(host)`: the machine, host included, can be built at compile time
+/// (e.g. inside a `static` behind a critical-section Mutex).
+static INITIAL: ManettaSm<BoardHost> = ManettaSm::new(BoardHost::new());
+
+/// Board-side shape of the integration: the firmware owns one machine (which owns the host), writes inputs into `vars`,
+/// dispatches an event, then reads the outputs (reply and status fields in `vars`, hardware through the host).
 ///
 /// Exported only so the state machine is actually compiled and linked into the static library.
 ///
@@ -17,8 +63,9 @@ static INITIAL: ManettaSm = ManettaSm::new();
 /// `events` must point to `len` readable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn manetta_demo(events: *const u8, len: usize, tick_ms: u32) -> u32 {
-    let mut sm = ManettaSm::new();
-    sm.vars.cmd_max_ms = 25_000;
+    let mut sm = ManettaSm::new(BoardHost::new());
+    // raw `dispatch_event(START_BREW)` uses the last stored event data; typed dispatchers set it
+    sm.vars.max_ms = 25_000;
     sm.start();
 
     let events = unsafe { core::slice::from_raw_parts(events, len) };
@@ -36,24 +83,18 @@ pub unsafe extern "C" fn manetta_demo(events: *const u8, len: usize, tick_ms: u3
     }
 
     // pack a few outputs so none of them is optimised away
-    (sm.state_id as u32)
-        | (sm.vars.reply as u32) << 8
-        | (sm.vars.stop_reason as u32) << 16
-        | (sm.vars.pump_on as u32) << 24
-        | (sm.vars.power_relay_on as u32) << 25
-        | (sm.vars.steam_on as u32) << 26
+    (sm.state_id as u32) | (sm.vars.reply as u32) << 8 | (sm.vars.stop_reason as u32) << 16 | sm.host.gpio_out << 24
 }
 
 /// What a low-power board would call after every dispatch: how long it may sleep before the next `do`.
 /// Exported only so it is compiled and linked (measures the cost of `next_deadline_ms()`).
 #[no_mangle]
 pub extern "C" fn manetta_next_deadline_ms(now_ms: u32, cmd_max_ms: u32) -> u32 {
-    let mut sm = ManettaSm::new();
+    let mut sm = ManettaSm::new(BoardHost::new());
     sm.start();
     sm.dispatch_event(EventId::TURN_ON);
     sm.dispatch_event(EventId::TEMP_READY);
-    sm.vars.cmd_max_ms = cmd_max_ms;
-    sm.dispatch_event(EventId::START_BREW);
+    sm.dispatch_start_brew(cmd_max_ms); // generated typed dispatcher for `START_BREW(uint max_ms)`
     sm.vars.now_ms = now_ms;
     sm.next_deadline_ms()
 }

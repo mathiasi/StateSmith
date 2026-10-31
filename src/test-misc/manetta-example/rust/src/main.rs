@@ -4,9 +4,34 @@
 mod manetta_sm;
 
 // The enums (Reply, Power, ...) are generated from the diagram's [RenderConfig.Portable] Types.
-use manetta_sm::{EventId, ManettaSm, Reply};
+use manetta_sm::{EventId, ManettaSm, ManettaSmHost, Reply};
 
 const TICK_MS: u32 = 100;
+
+/// The runner's host: remembers what the machine switched, like the board's GPIO outputs would.
+#[derive(Default)]
+struct TraceHost {
+    pump_on: bool,
+    power_relay_on: bool,
+    steam_on: bool,
+}
+
+impl ManettaSmHost for TraceHost {
+    fn set_pump(&mut self, on: bool) {
+        self.pump_on = on;
+    }
+    fn set_power_relay(&mut self, on: bool) {
+        self.power_relay_on = on;
+    }
+    fn set_steam_heater(&mut self, on: bool) {
+        self.steam_on = on;
+    }
+    fn power_relay_is_on(&mut self) -> bool {
+        self.power_relay_on
+    }
+}
+
+type Sm = ManettaSm<TraceHost>;
 
 fn parse_event(name: &str) -> EventId {
     match name {
@@ -31,10 +56,9 @@ fn parse_event(name: &str) -> EventId {
     }
 }
 
-fn set_var(sm: &mut ManettaSm, name: &str, value: u32) {
+fn set_var(sm: &mut Sm, name: &str, value: u32) {
     let v = &mut sm.vars;
     match name {
-        "cmd_max_ms" => v.cmd_max_ms = value,
         "device_max_brew_ms" => v.device_max_brew_ms = value,
         "device_max_steam_ms" => v.device_max_steam_ms = value,
         "heartbeat_timeout_ms" => v.heartbeat_timeout_ms = value,
@@ -44,23 +68,23 @@ fn set_var(sm: &mut ManettaSm, name: &str, value: u32) {
 }
 
 /// Everything the trace shows except the reply. Used to detect changes during `wait`.
-fn snapshot(sm: &ManettaSm) -> String {
+fn snapshot(sm: &Sm) -> String {
     let v = &sm.vars;
     format!(
         "{:<14} phase={:<7} power={:<7} steam={:<7} stop={:<11} src={:<7} pump={} relay={} steam_on={}",
-        ManettaSm::state_id_to_string(sm.state_id),
+        manetta_sm::state_id_to_string(sm.state_id),
         format!("{:?}", v.phase),
         format!("{:?}", v.power),
         format!("{:?}", v.steam_state),
         format!("{:?}", v.stop_reason),
         format!("{:?}", v.start_source),
-        v.pump_on as u8,
-        v.power_relay_on as u8,
-        v.steam_on as u8,
+        sm.host.pump_on as u8,
+        sm.host.power_relay_on as u8,
+        sm.host.steam_on as u8,
     )
 }
 
-fn print_line(sm: &ManettaSm, step: &str, reply: &str) {
+fn print_line(sm: &Sm, step: &str, reply: &str) {
     let t = sm.vars.now_ms;
     let time = format!("{}.{}s", t / 1000, (t % 1000) / 100);
     println!("t={:>7} | {:<26} | reply={:<9} | {}", time, step, reply, snapshot(sm));
@@ -74,7 +98,9 @@ fn main() {
     let mut do_dispatches: u64 = 0;
     let text = std::fs::read_to_string(&path).expect("can't read scenarios file");
 
-    let mut sm = ManettaSm::new();
+    let mut sm = Sm::new(TraceHost::default());
+    // the data the app sends with START_BREW / ENTER_STEAM (scenario: `set cmd_max_ms N`)
+    let mut cmd_max_ms: u32 = 0;
 
     for raw in text.lines() {
         let line = raw.split('#').next().unwrap().trim();
@@ -87,18 +113,29 @@ fn main() {
             "scenario" => {
                 println!();
                 println!("== {}", rest);
-                sm = ManettaSm::new();
+                sm = Sm::new(TraceHost::default());
+                cmd_max_ms = 0;
                 sm.start();
                 print_line(&sm, "start", "-");
             }
             "set" => {
                 let (name, value) = rest.split_once(' ').expect("set <var> <value>");
-                set_var(&mut sm, name, value.parse().expect("number"));
+                let value = value.parse().expect("number");
+                if name == "cmd_max_ms" {
+                    cmd_max_ms = value;
+                } else {
+                    set_var(&mut sm, name, value);
+                }
             }
             "cmd" => {
                 sm.vars.reply = Reply::NONE;
                 sm.vars.last_write_at = sm.vars.now_ms;
-                sm.dispatch_event(parse_event(rest));
+                // commands with data use the generated typed dispatchers
+                match rest {
+                    "START_BREW" => sm.dispatch_start_brew(cmd_max_ms),
+                    "ENTER_STEAM" => sm.dispatch_enter_steam(cmd_max_ms),
+                    _ => sm.dispatch_event(parse_event(rest)),
+                }
                 let reply = format!("{:?}", sm.vars.reply);
                 print_line(&sm, &format!("cmd {}", rest), &reply);
             }

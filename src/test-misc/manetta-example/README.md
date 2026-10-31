@@ -18,7 +18,7 @@ The Rust module also builds as `#![no_std]` for `riscv32imc-unknown-none-elf`.
 | Low-power host (`--sleep`: sleep until `next_deadline_ms()` instead of a 100 ms `do` tick) | same trace in both languages, **25 `do` dispatches instead of 2,190** |
 | Rust warnings | 0 rustc and 0 clippy warnings for the runner crate and the no_std crate |
 | TypeScript | `tsc` 6.0 with `strict`, target ES2020: no errors |
-| no_std, `riscv32imc-unknown-none-elf`, `opt-level = "s"` | builds. Whole crate object: **2,394 B `.text`** (including an exported `next_deadline_ms()` call), 0 data, 0 bss. The only external symbol is `memset` (from `compiler_builtins`) |
+| no_std, `riscv32imc-unknown-none-elf`, `opt-level = "s"` | builds. Whole crate object: **2,430 B `.text`** (including an exported `next_deadline_ms()` call and a GPIO-style host), 0 data, 0 bss. The only external symbol is `memset` (from `compiler_builtins`) |
 
 ## The diagram
 
@@ -66,10 +66,18 @@ enum Reply { NONE, OK, BUSY, NOT_READY, FAULT, INVALID }
 enum Power { OFF, HEATING, READY, COOLING, ON }
 ...
 """
+Functions = """
+void set_pump(bool on);              // brew pump
+bool power_relay_is_on();
+...
+"""
+Events = """
+START_BREW(uint max_ms)              // command cap for this brew
+ENTER_STEAM(uint max_ms)
+"""
 Variables = """
 uint now_ms = 0;                     // monotonic ms, set before every dispatch
 Reply reply = Reply.NONE;            // answer to the last command
-bool pump_on = false;
 ...
 """
 ```
@@ -89,6 +97,10 @@ How the pieces fit:
   The runners import them from the generated module.
 - **`after()`** makes StateSmith add a `BREWING_entered_at` variable and an entry action that stamps it.
   `BREWING --> IDLE : 1. after(brew_cmd_max_ms) [start_source == StartSource.APP] / ...` is a trigger; it's checked on each `do`.
+- **Host functions** (`[RenderConfig.Portable] Functions`) are how the machine touches hardware: `set_pump(true);`, `[power_relay_is_on()]`.
+  Rust gets a `ManettaSmHost` trait, and the machine is generic over it (`ManettaSm<H: ManettaSmHost>`, `const fn new(host)`). TypeScript gets an interface passed to the constructor.
+  The runners use a `TraceHost` that records the outputs; the no_std crate uses a GPIO-style `BoardHost`.
+- **Event data** (`[RenderConfig.Portable] Events`): `START_BREW(uint max_ms)` generates `dispatch_start_brew(max_ms)` (TS `dispatchStartBrew`), and diagram code reads `max_ms`.
 - **`next_deadline_ms()`** is generated from those timers. A host can sleep that long instead of ticking `do` every 100 ms.
   Both runners do this with `--sleep`; the traces stay identical.
 - **Unsigned arithmetic** wraps like the device's u32 counter in both languages.
@@ -101,22 +113,22 @@ Generated code for the same behaviour, IDLE handling START_BREW (step comments t
 fn idle_start_brew(&mut self) {
     let mut consume_event: bool = false;
 
-    // uml: 1. START_BREW [cmd_max_ms == 0] / { reply = Reply.INVALID; }
-    if self.vars.cmd_max_ms == 0 {
+    // uml: 1. START_BREW [max_ms == 0] / { reply = Reply.INVALID; }
+    if self.vars.max_ms == 0 {
         consume_event = true;
         self.vars.reply = Reply::INVALID;
     }
 
-    // uml: 2. START_BREW [cmd_max_ms != 0 && power != Power.READY] / { reply = Reply.NOT_READY; }
-    if self.vars.cmd_max_ms != 0 && self.vars.power != Power::READY {
+    // uml: 2. START_BREW [max_ms != 0 && power != Power.READY] / { reply = Reply.NOT_READY; }
+    if self.vars.max_ms != 0 && self.vars.power != Power::READY {
         consume_event = true;
         self.vars.reply = Reply::NOT_READY;
     }
 
-    // uml: 3. START_BREW [cmd_max_ms != 0 && power == Power.READY] / { reply = Reply.OK; start_source = StartSource.APP; brew_cmd_max_ms = cmd_max_ms; } TransitionTo(BREWING)
-    if self.vars.cmd_max_ms != 0 && self.vars.power == Power::READY {
+    // uml: 3. START_BREW [max_ms != 0 && power == Power.READY] / { reply = Reply.OK; start_source = StartSource.APP; brew_cmd_max_ms = max_ms; } TransitionTo(BREWING)
+    if self.vars.max_ms != 0 && self.vars.power == Power::READY {
         self.idle_exit();
-        self.vars.reply = Reply::OK; self.vars.start_source = StartSource::APP; self.vars.brew_cmd_max_ms = self.vars.cmd_max_ms;
+        self.vars.reply = Reply::OK; self.vars.start_source = StartSource::APP; self.vars.brew_cmd_max_ms = self.vars.max_ms;
         self.brewing_enter();
         return;
     }
@@ -132,23 +144,23 @@ fn idle_start_brew(&mut self) {
 private IDLE_start_brew(): void
 {
     let consume_event: boolean = false;
-    // uml: 1. START_BREW [cmd_max_ms == 0] / { reply = Reply.INVALID; }
-    if (this.vars.cmd_max_ms == 0)
+    // uml: 1. START_BREW [max_ms == 0] / { reply = Reply.INVALID; }
+    if (this.vars.max_ms == 0)
     {
         consume_event = true;
         this.vars.reply = Reply.INVALID;
     }
-    // uml: 2. START_BREW [cmd_max_ms != 0 && power != Power.READY] / { reply = Reply.NOT_READY; }
-    if (this.vars.cmd_max_ms != 0 && this.vars.power != Power.READY)
+    // uml: 2. START_BREW [max_ms != 0 && power != Power.READY] / { reply = Reply.NOT_READY; }
+    if (this.vars.max_ms != 0 && this.vars.power != Power.READY)
     {
         consume_event = true;
         this.vars.reply = Reply.NOT_READY;
     }
-    // uml: 3. START_BREW [cmd_max_ms != 0 && power == Power.READY] / { ... } TransitionTo(BREWING)
-    if (this.vars.cmd_max_ms != 0 && this.vars.power == Power.READY)
+    // uml: 3. START_BREW [max_ms != 0 && power == Power.READY] / { ... } TransitionTo(BREWING)
+    if (this.vars.max_ms != 0 && this.vars.power == Power.READY)
     {
         this.IDLE_exit();
-        this.vars.reply = Reply.OK; this.vars.start_source = StartSource.APP; this.vars.brew_cmd_max_ms = this.vars.cmd_max_ms;
+        this.vars.reply = Reply.OK; this.vars.start_source = StartSource.APP; this.vars.brew_cmd_max_ms = this.vars.max_ms;
         this.BREWING_enter();
         return;
     }
@@ -171,7 +183,7 @@ All of the requested scope:
 
 Choices made where the scope left room:
 - **START_BREW while heating:** NOT_READY. A brew needs `power == READY`, so COOLING after steam is NOT_READY too.
-- **START_BREW / ENTER_STEAM with `cmd_max_ms == 0`:** INVALID. A value above the device cap is accepted, and the device cap wins.
+- **START_BREW / ENTER_STEAM with `max_ms == 0`:** INVALID. A value above the device cap is accepted, and the device cap wins.
 - **Steam HEATING → READY:** on `TEMP_READY`, not a device-chosen time.
 - **ENTER_STEAM while heating:** NOT_READY. While READY or COOLING it's OK.
 - **Two brew caps due on the same tick:** the command cap wins and is reported, by ordering (`1. do` before `2. do`). Steam works the same way.
@@ -383,7 +395,7 @@ Status on this branch: ✅ fixed by portable code, ◐ partly, ◻ still open (s
    - The host sets `last_write_at` on every BLE write instead. That's arguably the right place, but it's behaviour outside the diagram.
 4. ◻ **No `else` for event handlers.**
    - When guarded behaviours in one state handle the same event, *every* passing guard runs; StateSmith keeps evaluating after an action-only behaviour.
-   - So IDLE's three START_BREW behaviours need mutually exclusive guards, which repeats `cmd_max_ms != 0 &&`.
+   - So IDLE's three START_BREW behaviours need mutually exclusive guards, which repeats `max_ms != 0 &&`.
    - A choice point would give `else`, but its outgoing transitions would exit and re-enter IDLE just to answer a command.
 5. ◻ **Parallel concerns become "do nothing" overrides.** Steam must hide the brew temperature events from ON, which takes a bare
    `STEAM : (TEMP_HEATING, TEMP_READY, TEMP_TOO_HOT)` behaviour. It reads oddly unless you know that a behaviour with no action still consumes the event.
@@ -396,9 +408,8 @@ Status on this branch: ✅ fixed by portable code, ◐ partly, ◻ still open (s
    - Was: the enum definitions were written twice by hand.
 8. ✅ **Variable declarations aren't language neutral.** Now declared once in the diagram; the C# glue is gone.
    - Was: the generator kept one C# table and rendered it per language, so the glue (expansions, var table) was a third language in a Rust and TypeScript build.
-9. ◻ **Commands answer through a `reply` variable.** Typed event payloads are planned (P3). It works, but every state path must remember to set `reply`:
-   the root, ON and OFF hold defaults so nothing slips through. Event arguments (`cmd_max_ms`) are written to variables before the dispatch,
-   because events carry no payload.
+9. ◐ **Commands answer through a `reply` variable.** Event data is now typed (`dispatch_start_brew(max_ms)`); the reply is still a variable. It works, but every state path must remember to set `reply`:
+   the root, ON and OFF hold defaults so nothing slips through. Was: event arguments (`cmd_max_ms`) were written to a variable before the dispatch.
 10. ◐ **Naming compromise in Rust.** SCREAMING_CASE enum variants keep the diagram text identical for both languages, at the cost of
     `#![allow(...)]` lints. These now sit in the generated file, where the enums live.
 
@@ -444,7 +455,7 @@ Files:
 - `rust/`:
   - `src/manetta_sm.rs`: generated;
   - `src/main.rs`: the scenario runner.
-- `rust-nostd/`: `#![no_std]` staticlib for riscv32imc. It uses the generated `manetta_sm.rs` via `#[path]`.
+- `rust-nostd/`: `#![no_std]` staticlib for riscv32imc. It uses the generated `manetta_sm.rs` via `#[path]`, with a GPIO-style `BoardHost`.
 - `ts/`:
   - `ManettaSm.ts`: generated;
   - `runner.ts`: the scenario runner;

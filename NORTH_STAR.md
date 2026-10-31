@@ -4,14 +4,16 @@
 StateSmith generates idiomatic, allocation-free Rust for the board and TypeScript for the app from it, with **no per-language glue**.
 Nobody hand-writes enums twice or keeps a C# expansion file next to a Rust and TypeScript codebase. Nothing new has to be learned beyond the diagram.
 
-This document has four parts:
+This document has five parts:
 1. what "best" looks like;
 2. the principles behind it;
 3. a phased roadmap with effort;
-4. what is already working on branch `north-star`.
+4. what is already working on branch `north-star`;
+5. the design of the host and event data (P3).
 
-The first step, **portable code**, is implemented there. With it, the Manetta example regenerates with zero glue,
-and its trace is byte-identical to the expansion-based version (Rust == TypeScript == before).
+Implemented there so far: portable code (P1), time with `after()` and `next_deadline_ms()` (P2), host calls and typed event data (P3),
+and root behaviours in PlantUML (part of P4). The Manetta example regenerates from the diagram alone, with zero glue.
+Its trace is still byte-identical to the expansion-based version (Rust == TypeScript == before, polling == sleeping).
 
 ## 1. What the diagram should say
 
@@ -29,22 +31,22 @@ uint now_ms = 0;                  // host time
 uint heartbeat_timeout_ms = 10000;
 Reply reply = Reply.NONE;
 Power power = Power.OFF;
-bool pump_on = false;
 """
-Events = """                                                 ' ◻ P3 typed event payloads
+Events = """                                                 ' ✅ P3 typed event payloads
 START_BREW(uint max_ms)
 ENTER_STEAM(uint max_ms)
 """
-Functions = """                                              ' ◻ P3 host calls -> Rust trait / TS interface
-void log(StopReason why);
+Functions = """                                              ' ✅ P3 host calls -> Rust trait / TS interface
+void set_pump(bool on);
+bool power_relay_is_on();
 """
 '/
 
 ManettaSm : PING / reply = Reply.OK;                         ' ✅ root behaviours in PlantUML (no wrapper state)
 
 IDLE --> BREWING : START_BREW [max_ms != 0 && power == Power.READY] / reply = Reply.OK; brew_cmd_max_ms = max_ms;
-                                                             ' ✅ portable code   ◻ P3 `max_ms` payload (today: `cmd_max_ms` var)
-BREWING : enter / pump_on = true;                            ' ✅
+                                                             ' ✅ portable code, `max_ms` from `dispatch_start_brew(max_ms)`
+BREWING : enter / set_pump(true);                            ' ✅ host call
 BREWING --> IDLE : after(brew_cmd_max_ms) [start_source == StartSource.APP] / stop_reason = StopReason.COMMAND_CAP;
                                                              ' ✅ `after()` trigger (sugar for `do [after(ms) && (guard)]`)
 BREWING --> IDLE : do [elapsed(last_write_at) >= heartbeat_timeout_ms] / stop_reason = StopReason.HEARTBEAT;   ' ✅
@@ -109,7 +111,7 @@ What stays out on purpose:
 | P0 | Rust target | GIL → Rust visitor (`RUST_SPIKE.md`) | 14–34 days to upstream quality (earlier estimate) | spike done (`rust-spike`) |
 | **P1** | **Portable code**: `[RenderConfig.Portable]` Types + Variables; all diagram code is GIL | declarations emitted into GIL; vars auto-expanded with the GIL path; action and guard code wrapped as GIL instead of raw echo | spike: done. Upstream: 1–2 weeks (make every transpiler handle field initialisers, unsigned math and user enums; explicit opt-in switch; docs) | **✅ Rust + TS** |
 | **P2** | **Time**: `after(ms)`, `elapsed(t)` | transform adds `{STATE}_entered_at` plus an entry action; text rewrite at expansion; transpilers map unsigned `+ - *` to wrapping ops | spike done: `after(ms)` trigger (grammar), `elapsed()`, generated `next_deadline_ms()`. Upstream: all transpilers, plus a decision on one-shot vs level-triggered `after()`: about 1 week | **✅ Rust + TS** |
-| P3 | Host calls and event payloads | `Functions` → a Rust trait as a generic parameter (`ManettaSm<H: ManettaHost>`) plus a TS interface; `START_BREW(uint max_ms)` → typed `dispatch_start_brew(max_ms)` | 2–3 weeks; needs generics support in the Rust visitor and an agreed design for each target | ◻ |
+| P3 | Host calls and event payloads | `Functions` → a Rust trait as a generic parameter (`ManettaSm<H: ManettaHost>`) plus a TS interface; `START_BREW(uint max_ms)` → typed `dispatch_start_brew(max_ms)` | spike done (design in section 5). Upstream: 1–2 weeks to cover the other targets (C: extern functions or a function-pointer struct) and agree the design with the maintainer | **✅ Rust + TS** |
 | P4 | Diagram ergonomics | root behaviours in PlantUML; accept `left to right direction`; `in(STATE)` guard (subtree-id range check); event groups `(COMMANDS)` | about 1 week, mostly grammar plus small transforms | ◐ root behaviours done |
 | P5 | Orthogonal regions | per-region state ids, dispatch to each region, cross-region exit, `in()` across regions (see the earlier analysis) | 4–8 weeks, core algorithm; only if a truly independent concern appears | ◻ (not needed for Manetta) |
 
@@ -149,7 +151,7 @@ Upstream path: P1 and P2 help all eight languages, not just Rust, so they make a
 - **Diagram text:** the three state-entry timers are now real triggers, e.g. `BREWING --> IDLE : 1. after(brew_cmd_max_ms) [start_source == StartSource.APP] / ...`.
 - **Sleeping host:** both runners have a `--sleep` mode that, like a low-power board, sleeps until `next_deadline_ms()` instead of ticking `do` every 100 ms.
   The traces are identical to polling, and identical across Rust and TypeScript, with **25 `do` dispatches instead of 2,190** over the 12 scenarios.
-- **Builds:** clippy-clean; `#![no_std]` riscv32imc build is 2,394 B `.text`. That includes an exported `manetta_next_deadline_ms()` (312 B) to prove the deadline query compiles for the board.
+- **Builds:** clippy-clean; `#![no_std]` riscv32imc build was 2,394 B `.text` at this step (2,430 B after P3). That includes an exported `manetta_next_deadline_ms()` (312 B) to prove the deadline query compiles for the board.
 
 **Tests:**
 - `PortableCodeTests` (6): Rust and TS output (including the `after()` trigger and `next_deadline_ms()`), balanced-paren rewriting, missing time variable,
@@ -173,7 +175,64 @@ Upstream path: P1 and P2 help all eight languages, not just Rust, so they make a
 - **Cosmetics:** some redundant parentheses around wrapped time expressions, and `self.vars.X_entered_at` names follow the state name casing.
   The `// uml:` comment shows the desugared `do [after(...) && (...)]` form.
 
+**P3 on this branch (see section 5 for the design):**
+- **`[RenderConfig.Portable] Functions`:** GIL interface syntax (`void set_pump(bool on);`).
+  - StateSmith emits a host interface `{Sm}Host` (`ManettaSmHost`), a `host` field, and a constructor that takes it.
+  - Diagram calls to declared functions are rewritten to `this.host.f(...)` at expansion.
+  - **Rust:** `pub trait ManettaSmHost` (all methods `&mut self`); `pub struct ManettaSm<H: ManettaSmHost> { ..., pub host: H }`; `impl<H: ManettaSmHost>`; `pub const fn new(host: H)`;
+    `impl<H: ManettaSmHost + Default> Default`. Static helpers (`state_id_to_string`, ...) become module functions, so callers don't need a type argument.
+  - **TypeScript:** `export interface ManettaSmHost`, and a real `constructor(host: ManettaSmHost)`. Only constructors with parameters change; existing TypeScript output is untouched.
+- **`[RenderConfig.Portable] Events`:** `START_BREW(uint max_ms)` generates a `max_ms` variable and `dispatch_start_brew(max_ms)` (TS `dispatchStartBrew`).
+  Arguments with the same name share a variable and must have the same type. A declared event that no behaviour uses is an error.
+- **Manetta:**
+  - pump, power relay and steam heater are host calls (`set_pump(true);`), and the fault-clear choice asks the host (`[power_relay_is_on()]`);
+  - `cmd_max_ms` became the `max_ms` payload of `START_BREW` / `ENTER_STEAM`;
+  - the runners implement a recording `TraceHost` and call the typed dispatchers;
+  - the board crate implements a GPIO-style `BoardHost`.
+- **Results:** traces are still byte-identical to v1 for Rust and TypeScript, polling and sleeping. The no_std board build is 2,430 B `.text`, clippy-clean, static dispatch.
+- **Tests:** `PortableHostAndPayloadTests` (4). The full suite has 762 passing, and the same 92 environmental failures as the base commit.
+
 **Next concrete steps:**
-1. P3: design the host trait / interface (`ManettaHost`), then typed event payloads (`START_BREW(uint max_ms)`).
-2. P1/P2 hardening: C99 and C# in portable mode, plus a Spec2-style portable spec run in several languages.
+1. Hardening for upstream: C99 and C# in portable mode (C99 needs initialisers in its ctor, and host calls as extern functions or a function-pointer struct), plus a Spec2-style portable spec run in several languages.
+2. An explicit portable-mode switch instead of "implied by the section".
 3. P4 remainder: accept `left to right direction`, an `in(STATE)` guard, event groups.
+4. A design discussion upstream (StateSmith/StateSmith#475 for Rust; portable code and time helpers as their own proposal), when you decide to.
+
+## 5. P3 design: how the host gets in, and how events carry data
+
+The question: diagram code like `set_pump(true)` has to reach the board's hardware (or a test mock) in Rust, and the app's code in TypeScript.
+The generated machine must stay `no_std`, allocation-free and cheap.
+
+**Rust options considered:**
+
+| Option | Generated shape | For | Against |
+|---|---|---|---|
+| **A. Owned generic host** (chosen) | `ManettaSm<H: ManettaSmHost> { ..., pub host: H }`, `const fn new(host: H)` | static dispatch, no lifetimes, `const` construction, trivial mocks (`ManettaSm::new(MockHost::default())`), the host can own the peripherals | the machine owns the host, so other code reaches the peripherals through `sm.host`; static helpers can't be associated functions any more (made module functions) |
+| B. Host passed per call | `dispatch_event(&mut self, host: &mut impl ManettaSmHost, ev)`, threaded through every handler | the firmware keeps ownership of its peripherals; no type parameter on the struct | every generated function gets an extra parameter; easy to call with the wrong host; more generator work |
+| C. Stored reference | `ManettaSm<'a, H> { host: &'a mut H }` | the firmware keeps ownership | lifetime on the struct makes it hard to put in a `static`; awkward in RTIC / embassy tasks |
+| D. Trait implemented on the machine by the user | `impl ManettaSmHost for ManettaSm { ... }` in user code | no generics at all | the machine can't own peripherals except as `Vars` fields; mocks need `cfg` tricks |
+| E. Trait object | `Box<dyn ManettaSmHost>` | familiar | needs an allocator: ruled out for the board |
+
+**Decision: A.** It's what the board wants (zero-cost, `static`-friendly), and test code gets the most out of it.
+B is the natural follow-up if a firmware design really needs to keep the peripherals outside the machine.
+It could be a per-diagram setting later (`HostPassing = "owned" | "per_call"`), with the same diagram text.
+
+Details that follow from A:
+- **Every trait method takes `&mut self`,** even queries like `power_relay_is_on()`. On embedded, reading a pin or sensor usually needs `&mut` (embedded-hal), and one rule is simpler than inferring.
+- **No reentrancy.** Host methods only get `&mut` to the host, never to the machine, so a callback can't dispatch an event into a machine that is mid-transition.
+  A host that wants to raise an event queues it and dispatches after the current dispatch returns.
+- **The host stays reachable** as `sm.host`, a public field, so the firmware can service peripherals between dispatches.
+- **Statics move out of the `impl`.** `ManettaSm::state_id_to_string(..)` would need `ManettaSm::<SomeHost>::...`, so static helpers become module functions (`manetta_sm::state_id_to_string`).
+- **TypeScript is structural,** so the host is just an interface passed to the constructor. Mocks are plain objects.
+- **Other targets:**
+  - C# and Java: an interface field;
+  - Python: duck typing;
+  - C: either `extern` functions the user links in (`void ManettaSm_host_set_pump(ManettaSm* sm, bool on);`) or a struct of function pointers set at init.
+
+  The GIL shape (an interface-typed field plus a constructor parameter) works for all of them.
+
+**Event data:** `START_BREW(uint max_ms)` generates a `max_ms` variable plus a typed `dispatch_start_brew(max_ms)` that stores it and dispatches.
+- **Why variables and not real function parameters:** event handlers in GIL take no arguments, and threading arguments through every ancestor handler would touch the core algorithm.
+  A stored argument keeps the algorithm unchanged and also lets guards in ancestor states read it.
+- **Shared by name:** arguments with the same name share one variable (both commands' `max_ms`), so they must agree on type.
+- **Plain dispatch still works:** `dispatch_event(START_BREW)` uses the last stored value. That's handy for replay, but the typed function is the API to use.

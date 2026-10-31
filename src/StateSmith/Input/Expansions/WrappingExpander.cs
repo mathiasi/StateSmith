@@ -69,7 +69,10 @@ public class WrappingExpander
     protected string ExpandWrapCode(string code, bool isGuard, Behavior behavior)
     {
         if (portable?.IsEnabled == true)
+        {
             code = PortableTimeProcessor.Rewrite(code, behavior, portable); // `after()`, `elapsed()`
+            code = portable.RewriteHostCalls(code);                          // `set_pump(true)` -> `this.host.set_pump(true)`
+        }
 
         string expanded = ExpandCode(code, behavior);
 

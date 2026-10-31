@@ -116,7 +116,7 @@ public class TypeScriptGilVisitor : CSharpSyntaxWalker
             var old = sb;
             sb = new StringBuilder();
 
-            foreach (var kid in node.ChildNodes().Where(n => n is EnumDeclarationSyntax || n is ClassDeclarationSyntax || n is FieldDeclarationSyntax))
+            foreach (var kid in node.ChildNodes().Where(n => n is EnumDeclarationSyntax || n is ClassDeclarationSyntax || n is FieldDeclarationSyntax || n is InterfaceDeclarationSyntax))
             {
                 if (kid is FieldDeclarationSyntax field)
                 {
@@ -138,6 +138,68 @@ public class TypeScriptGilVisitor : CSharpSyntaxWalker
         }
 
         nestedCount--;
+    }
+
+    /// <summary>
+    /// Portable code host (P3): GIL `interface SmHost { void set_pump(bool on); }` to
+    /// `export interface SmHost { set_pump(on: boolean): void; }`.
+    /// </summary>
+    public override void VisitInterfaceDeclaration(InterfaceDeclarationSyntax node)
+    {
+        VisitLeadingTrivia(node.GetFirstToken());
+        string indent = StringUtils.FindLastIndent(sb);
+        sb.Append($"export interface {node.Identifier.Text}");
+        VisitTrailingTrivia(node.Identifier);
+        VisitToken(node.OpenBraceToken);
+
+        foreach (var m in node.Members.OfType<MethodDeclarationSyntax>())
+        {
+            VisitLeadingTrivia(m.GetFirstToken());
+            sb.Append(m.Identifier.Text);
+            sb.Append('(');
+            bool first = true;
+            foreach (var p in m.ParameterList.Parameters)
+            {
+                if (!first) sb.Append(", ");
+                first = false;
+                VisitParameter(p);
+            }
+            sb.Append("): ");
+            skipLeadingTrivia = true;
+            Visit(m.ReturnType);
+            StringUtils.EraseTrailingWhitespace(sb);
+            sb.Append(';');
+            VisitTrailingTrivia(m.GetLastToken());
+        }
+
+        VisitToken(node.CloseBraceToken);
+        _ = indent;
+    }
+
+    /// <summary>
+    /// A constructor with parameters (portable code host) becomes a real TypeScript `constructor(...)`.
+    /// A parameterless one keeps the historical output.
+    /// </summary>
+    public override void VisitConstructorDeclaration(ConstructorDeclarationSyntax node)
+    {
+        if (!node.ParameterList.Parameters.Any())
+        {
+            base.VisitConstructorDeclaration(node);
+            return;
+        }
+
+        VisitLeadingTrivia(node.GetFirstToken());
+        sb.Append("constructor(");
+        bool first = true;
+        foreach (var p in node.ParameterList.Parameters)
+        {
+            if (!first) sb.Append(", ");
+            first = false;
+            VisitParameter(p);
+        }
+        sb.Append(')');
+        VisitTrailingTrivia(node.ParameterList.CloseParenToken);
+        Visit(node.Body.ThrowIfNull());
     }
 
     public override void VisitFieldDeclaration(FieldDeclarationSyntax node)

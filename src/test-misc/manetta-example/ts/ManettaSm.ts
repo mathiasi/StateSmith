@@ -53,6 +53,15 @@ export const STEAM_SubtreeEndId: number = 8;  // State 'STEAM' subtree extends f
 export const STEAM_HEATING_SubtreeEndId: number = 7;  // State 'STEAM_HEATING' subtree extends from itself (id: 7) to state 'STEAM_HEATING' (id: 7)
 export const STEAM_READY_SubtreeEndId: number = 8;  // State 'STEAM_READY' subtree extends from itself (id: 8) to state 'STEAM_READY' (id: 8)
 
+// Host: what the state machine calls in the outside world (portable code).
+export interface ManettaSmHost
+{
+    set_pump(on: boolean): void;              // brew pump
+    set_power_relay(on: boolean): void;       // boiler power relay
+    set_steam_heater(on: boolean): void;
+    power_relay_is_on(): boolean;
+}
+
 // User types (portable code)
 export enum Reply { NONE, OK, BUSY, NOT_READY, FAULT, INVALID }
 export enum Phase { IDLE, BREWING, FAULT }
@@ -69,7 +78,6 @@ export class Vars
     // ---- inputs written by the host ----
     public now_ms: number = 0;                     // monotonic ms, set before every dispatch
     public last_write_at: number = 0;              // now_ms of the last BLE write
-    public cmd_max_ms: number = 0;                 // argument of START_BREW / ENTER_STEAM
     // ---- device configuration ----
     public device_max_brew_ms: number = 1800000;   // at most 30 min
     public device_max_steam_ms: number = 600000;   // counts from when steam began
@@ -82,14 +90,12 @@ export class Vars
     public steam_state: SteamState = SteamState.OFF;
     public stop_reason: StopReason = StopReason.NONE;
     public start_source: StartSource = StartSource.NONE;
-    public pump_on: boolean = false;
-    public power_relay_on: boolean = false;
-    public steam_on: boolean = false;
     // ---- internal ----
     public brew_cmd_max_ms: number = 0;
     public steam_cmd_at: number = 0;               // last ENTER_STEAM (a repeat restarts the command cap)
     public steam_cmd_max_ms: number = 0;
     public auto_off_from: number = 0;              // later of the last TURN_ON and the end of the last brew
+    public max_ms: number = 0; // event data: START_BREW, ENTER_STEAM
 }
 
 // Generated state machine
@@ -102,9 +108,13 @@ export class ManettaSm
     // Variables. Can be used for inputs, outputs, user variables...
     public vars: Vars = new Vars();
     
+    // Host. Set by the constructor. Diagram code calls its functions.
+    public host!: ManettaSmHost;
+    
     // State machine constructor. Must be called before start or dispatch event functions. Not thread safe.
-    public ManettaSm()
+    constructor(host: ManettaSmHost)
     {
+        this.host = host;
     }
     
     // Starts the state machine. Must be called before dispatching events. Not thread safe.
@@ -315,6 +325,20 @@ export class ManettaSm
         
     }
     
+    // Dispatches `START_BREW` with its data. Not thread safe.
+    public dispatchStartBrew(max_ms: number): void 
+    {
+        this.vars.max_ms = max_ms;
+        this.dispatchEvent(EventId.START_BREW);
+    }
+    
+    // Dispatches `ENTER_STEAM` with its data. Not thread safe.
+    public dispatchEnterSteam(max_ms: number): void 
+    {
+        this.vars.max_ms = max_ms;
+        this.dispatchEvent(EventId.ENTER_STEAM);
+    }
+    
     // This function is used when StateSmith doesn't know what the active leaf state is at
     // compile time due to sub states or when multiple states need to be exited.
     private exitUpToStateHandler(desiredState: StateId): void 
@@ -465,8 +489,8 @@ export class ManettaSm
             // ROOT.<ChoicePoint>(AFTER_FAULT) is a pseudo state and cannot have an `enter` trigger.
             
             // ROOT.<ChoicePoint>(AFTER_FAULT) behavior
-            // uml: [power_relay_on] TransitionTo(ON)
-            if (this.vars.power_relay_on)
+            // uml: [power_relay_is_on()] TransitionTo(ON)
+            if (this.host.power_relay_is_on())
             {
                 // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition). Already at LCA, no exiting required.
                 
@@ -532,10 +556,10 @@ export class ManettaSm
     private FAULT_turn_off(): void 
     {
         // FAULT behavior
-        // uml: TURN_OFF / { reply = Reply.OK; power_relay_on = false; power = Power.OFF; }
+        // uml: TURN_OFF / { reply = Reply.OK; set_power_relay(false); power = Power.OFF; }
         {
-            // Step 1: execute action `reply = Reply.OK; power_relay_on = false; power = Power.OFF;`
-            this.vars.reply = Reply.OK; this.vars.power_relay_on = false; this.vars.power = Power.OFF;
+            // Step 1: execute action `reply = Reply.OK; set_power_relay(false); power = Power.OFF;`
+            this.vars.reply = Reply.OK; this.host.set_power_relay(false); this.vars.power = Power.OFF;
         } // end of behavior for FAULT
         
         // No ancestor handles this event.
@@ -563,10 +587,10 @@ export class ManettaSm
         this.stateId = StateId.OFF;
         
         // OFF behavior
-        // uml: enter / { power_relay_on = false; power = Power.OFF; }
+        // uml: enter / { set_power_relay(false); power = Power.OFF; }
         {
-            // Step 1: execute action `power_relay_on = false; power = Power.OFF;`
-            this.vars.power_relay_on = false; this.vars.power = Power.OFF;
+            // Step 1: execute action `set_power_relay(false); power = Power.OFF;`
+            this.host.set_power_relay(false); this.vars.power = Power.OFF;
         } // end of behavior for OFF
     }
     
@@ -664,10 +688,10 @@ export class ManettaSm
         this.stateId = StateId.ON;
         
         // ON behavior
-        // uml: enter / { power_relay_on = true; power = Power.HEATING; auto_off_from = now_ms; }
+        // uml: enter / { set_power_relay(true); power = Power.HEATING; auto_off_from = now_ms; }
         {
-            // Step 1: execute action `power_relay_on = true; power = Power.HEATING; auto_off_from = now_ms;`
-            this.vars.power_relay_on = true; this.vars.power = Power.HEATING; this.vars.auto_off_from = this.vars.now_ms;
+            // Step 1: execute action `set_power_relay(true); power = Power.HEATING; auto_off_from = now_ms;`
+            this.host.set_power_relay(true); this.vars.power = Power.HEATING; this.vars.auto_off_from = this.vars.now_ms;
         } // end of behavior for ON
     }
     
@@ -823,20 +847,20 @@ export class ManettaSm
         } // end of behavior for BREWING
         
         // BREWING behavior
-        // uml: enter / { phase = Phase.BREWING; stop_reason = StopReason.NONE; pump_on = true; }
+        // uml: enter / { phase = Phase.BREWING; stop_reason = StopReason.NONE; set_pump(true); }
         {
-            // Step 1: execute action `phase = Phase.BREWING; stop_reason = StopReason.NONE; pump_on = true;`
-            this.vars.phase = Phase.BREWING; this.vars.stop_reason = StopReason.NONE; this.vars.pump_on = true;
+            // Step 1: execute action `phase = Phase.BREWING; stop_reason = StopReason.NONE; set_pump(true);`
+            this.vars.phase = Phase.BREWING; this.vars.stop_reason = StopReason.NONE; this.host.set_pump(true);
         } // end of behavior for BREWING
     }
     
     private BREWING_exit(): void 
     {
         // BREWING behavior
-        // uml: exit / { pump_on = false; phase = Phase.IDLE; auto_off_from = now_ms; }
+        // uml: exit / { set_pump(false); phase = Phase.IDLE; auto_off_from = now_ms; }
         {
-            // Step 1: execute action `pump_on = false; phase = Phase.IDLE; auto_off_from = now_ms;`
-            this.vars.pump_on = false; this.vars.phase = Phase.IDLE; this.vars.auto_off_from = this.vars.now_ms;
+            // Step 1: execute action `set_pump(false); phase = Phase.IDLE; auto_off_from = now_ms;`
+            this.host.set_pump(false); this.vars.phase = Phase.IDLE; this.vars.auto_off_from = this.vars.now_ms;
         } // end of behavior for BREWING
         
         this.stateId = StateId.ON;
@@ -1083,8 +1107,8 @@ export class ManettaSm
         let consume_event: boolean = false;
         
         // IDLE behavior
-        // uml: 1. ENTER_STEAM [cmd_max_ms == 0] / { reply = Reply.INVALID; }
-        if (this.vars.cmd_max_ms == 0)
+        // uml: 1. ENTER_STEAM [max_ms == 0] / { reply = Reply.INVALID; }
+        if (this.vars.max_ms == 0)
         {
             // Consume event `enter_steam`.
             consume_event = true;
@@ -1093,8 +1117,8 @@ export class ManettaSm
         } // end of behavior for IDLE
         
         // IDLE behavior
-        // uml: 2. ENTER_STEAM [cmd_max_ms != 0 && power == Power.HEATING] / { reply = Reply.NOT_READY; }
-        if (this.vars.cmd_max_ms != 0 && this.vars.power == Power.HEATING)
+        // uml: 2. ENTER_STEAM [max_ms != 0 && power == Power.HEATING] / { reply = Reply.NOT_READY; }
+        if (this.vars.max_ms != 0 && this.vars.power == Power.HEATING)
         {
             // Consume event `enter_steam`.
             consume_event = true;
@@ -1103,14 +1127,14 @@ export class ManettaSm
         } // end of behavior for IDLE
         
         // IDLE behavior
-        // uml: 3. ENTER_STEAM [cmd_max_ms != 0 && power != Power.HEATING] / { reply = Reply.OK; steam_cmd_max_ms = cmd_max_ms; } TransitionTo(STEAM)
-        if (this.vars.cmd_max_ms != 0 && this.vars.power != Power.HEATING)
+        // uml: 3. ENTER_STEAM [max_ms != 0 && power != Power.HEATING] / { reply = Reply.OK; steam_cmd_max_ms = max_ms; } TransitionTo(STEAM)
+        if (this.vars.max_ms != 0 && this.vars.power != Power.HEATING)
         {
             // Step 1: Exit states until we reach `ON` state (Least Common Ancestor for transition).
             this.IDLE_exit();
             
-            // Step 2: Transition action: `reply = Reply.OK; steam_cmd_max_ms = cmd_max_ms;`.
-            this.vars.reply = Reply.OK; this.vars.steam_cmd_max_ms = this.vars.cmd_max_ms;
+            // Step 2: Transition action: `reply = Reply.OK; steam_cmd_max_ms = max_ms;`.
+            this.vars.reply = Reply.OK; this.vars.steam_cmd_max_ms = this.vars.max_ms;
             
             // Step 3: Enter/move towards transition target `STEAM`.
             this.STEAM_enter();
@@ -1176,8 +1200,8 @@ export class ManettaSm
         let consume_event: boolean = false;
         
         // IDLE behavior
-        // uml: 1. START_BREW [cmd_max_ms == 0] / { reply = Reply.INVALID; }
-        if (this.vars.cmd_max_ms == 0)
+        // uml: 1. START_BREW [max_ms == 0] / { reply = Reply.INVALID; }
+        if (this.vars.max_ms == 0)
         {
             // Consume event `start_brew`.
             consume_event = true;
@@ -1186,8 +1210,8 @@ export class ManettaSm
         } // end of behavior for IDLE
         
         // IDLE behavior
-        // uml: 2. START_BREW [cmd_max_ms != 0 && power != Power.READY] / { reply = Reply.NOT_READY; }
-        if (this.vars.cmd_max_ms != 0 && this.vars.power != Power.READY)
+        // uml: 2. START_BREW [max_ms != 0 && power != Power.READY] / { reply = Reply.NOT_READY; }
+        if (this.vars.max_ms != 0 && this.vars.power != Power.READY)
         {
             // Consume event `start_brew`.
             consume_event = true;
@@ -1196,14 +1220,14 @@ export class ManettaSm
         } // end of behavior for IDLE
         
         // IDLE behavior
-        // uml: 3. START_BREW [cmd_max_ms != 0 && power == Power.READY] / { reply = Reply.OK; start_source = StartSource.APP; brew_cmd_max_ms = cmd_max_ms; } TransitionTo(BREWING)
-        if (this.vars.cmd_max_ms != 0 && this.vars.power == Power.READY)
+        // uml: 3. START_BREW [max_ms != 0 && power == Power.READY] / { reply = Reply.OK; start_source = StartSource.APP; brew_cmd_max_ms = max_ms; } TransitionTo(BREWING)
+        if (this.vars.max_ms != 0 && this.vars.power == Power.READY)
         {
             // Step 1: Exit states until we reach `ON` state (Least Common Ancestor for transition).
             this.IDLE_exit();
             
-            // Step 2: Transition action: `reply = Reply.OK; start_source = StartSource.APP; brew_cmd_max_ms = cmd_max_ms;`.
-            this.vars.reply = Reply.OK; this.vars.start_source = StartSource.APP; this.vars.brew_cmd_max_ms = this.vars.cmd_max_ms;
+            // Step 2: Transition action: `reply = Reply.OK; start_source = StartSource.APP; brew_cmd_max_ms = max_ms;`.
+            this.vars.reply = Reply.OK; this.vars.start_source = StartSource.APP; this.vars.brew_cmd_max_ms = this.vars.max_ms;
             
             // Step 3: Enter/move towards transition target `BREWING`.
             this.BREWING_enter();
@@ -1236,20 +1260,20 @@ export class ManettaSm
         } // end of behavior for STEAM
         
         // STEAM behavior
-        // uml: enter / { steam_on = true; power = Power.ON; steam_cmd_at = now_ms; }
+        // uml: enter / { set_steam_heater(true); power = Power.ON; steam_cmd_at = now_ms; }
         {
-            // Step 1: execute action `steam_on = true; power = Power.ON; steam_cmd_at = now_ms;`
-            this.vars.steam_on = true; this.vars.power = Power.ON; this.vars.steam_cmd_at = this.vars.now_ms;
+            // Step 1: execute action `set_steam_heater(true); power = Power.ON; steam_cmd_at = now_ms;`
+            this.host.set_steam_heater(true); this.vars.power = Power.ON; this.vars.steam_cmd_at = this.vars.now_ms;
         } // end of behavior for STEAM
     }
     
     private STEAM_exit(): void 
     {
         // STEAM behavior
-        // uml: exit / { steam_on = false; steam_state = SteamState.OFF; power = Power.COOLING; }
+        // uml: exit / { set_steam_heater(false); steam_state = SteamState.OFF; power = Power.COOLING; }
         {
-            // Step 1: execute action `steam_on = false; steam_state = SteamState.OFF; power = Power.COOLING;`
-            this.vars.steam_on = false; this.vars.steam_state = SteamState.OFF; this.vars.power = Power.COOLING;
+            // Step 1: execute action `set_steam_heater(false); steam_state = SteamState.OFF; power = Power.COOLING;`
+            this.host.set_steam_heater(false); this.vars.steam_state = SteamState.OFF; this.vars.power = Power.COOLING;
         } // end of behavior for STEAM
         
         this.stateId = StateId.ON;
@@ -1313,8 +1337,8 @@ export class ManettaSm
         let consume_event: boolean = false;
         
         // STEAM behavior
-        // uml: 1. ENTER_STEAM [cmd_max_ms == 0] / { reply = Reply.INVALID; }
-        if (this.vars.cmd_max_ms == 0)
+        // uml: 1. ENTER_STEAM [max_ms == 0] / { reply = Reply.INVALID; }
+        if (this.vars.max_ms == 0)
         {
             // Consume event `enter_steam`.
             consume_event = true;
@@ -1323,13 +1347,13 @@ export class ManettaSm
         } // end of behavior for STEAM
         
         // STEAM behavior
-        // uml: 2. ENTER_STEAM [cmd_max_ms != 0] / { reply = Reply.OK; steam_cmd_max_ms = cmd_max_ms; steam_cmd_at = now_ms; }
-        if (this.vars.cmd_max_ms != 0)
+        // uml: 2. ENTER_STEAM [max_ms != 0] / { reply = Reply.OK; steam_cmd_max_ms = max_ms; steam_cmd_at = now_ms; }
+        if (this.vars.max_ms != 0)
         {
             // Consume event `enter_steam`.
             consume_event = true;
-            // Step 1: execute action `reply = Reply.OK; steam_cmd_max_ms = cmd_max_ms; steam_cmd_at = now_ms;`
-            this.vars.reply = Reply.OK; this.vars.steam_cmd_max_ms = this.vars.cmd_max_ms; this.vars.steam_cmd_at = this.vars.now_ms;
+            // Step 1: execute action `reply = Reply.OK; steam_cmd_max_ms = max_ms; steam_cmd_at = now_ms;`
+            this.vars.reply = Reply.OK; this.vars.steam_cmd_max_ms = this.vars.max_ms; this.vars.steam_cmd_at = this.vars.now_ms;
         } // end of behavior for STEAM
         
         // Check if event has been consumed before calling ancestor handler.

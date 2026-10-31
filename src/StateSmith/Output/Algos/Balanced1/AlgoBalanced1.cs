@@ -146,6 +146,7 @@ public class AlgoBalanced1 : IGilAlgo
 
             OutputFuncStart();
             OutputFuncDispatchEvent();
+            MaybeOutputPortableTypedDispatch();
 
             OutputExitUpToFunction();
 
@@ -177,6 +178,38 @@ public class AlgoBalanced1 : IGilAlgo
         if (settings.outputGetParentIdFunction)
         {
             GetParentIdFunctionGen.Generate(file, Sm, mangler);
+        }
+    }
+
+    /// <summary>
+    /// EXPERIMENTAL portable code mode (P3). For each event declared with data (`START_BREW(uint max_ms)`), emits
+    /// `dispatch_start_brew(uint max_ms)`: stores the arguments, then dispatches the event.
+    /// </summary>
+    private void MaybeOutputPortableTypedDispatch()
+    {
+        if (portable?.IsEnabled != true)
+            return;
+
+        var smEvents = Sm.GetEventListCopy();
+        foreach (var payload in portable.EventPayloads())
+        {
+            var smEvent = smEvents.FirstOrDefault(e => string.Equals(e, payload.eventName, System.StringComparison.OrdinalIgnoreCase))
+                ?? throw new System.ArgumentException($"Event `{payload.eventName}` is declared in [RenderConfig.Portable] Events but no behavior uses it.");
+
+            string rawName = "dispatch_" + payload.eventName.ToLower();
+            string funcName = mangler is AbstractMangler am ? am.MangleFuncName(rawName) : rawName;
+            string parameters = string.Join(", ", payload.args.Select(a => $"{a.type} {a.name}"));
+
+            file.AppendIndentedLine($"// Dispatches `{payload.eventName}` with its data. Not thread safe.");
+            file.AppendIndented($"public void {funcName}({parameters})");
+            file.StartCodeBlock();
+            foreach (var arg in payload.args)
+            {
+                file.AppendIndentedLine($"this.vars.{arg.name} = {arg.name};");
+            }
+            file.AppendIndentedLine($"this.{mangler.SmDispatchEventFuncName}({mangler.SmEventEnumType}.{mangler.SmEventEnumValue(smEvent)});");
+            file.FinishCodeBlock();
+            file.AppendIndentedLine();
         }
     }
 
@@ -268,6 +301,13 @@ public class AlgoBalanced1 : IGilAlgo
                         {
                             file.AppendIndentedLine(RenderConfigPortableVars.IsCommentOrBlank(line) ? line.Trim() : "public " + line.Trim());
                         }
+
+                        var payloads = portable.EventPayloads();
+                        foreach (var arg in portable.EventArgVars())
+                        {
+                            var events = string.Join(", ", payloads.Where(p => p.args.Contains(arg)).Select(p => p.eventName));
+                            file.AppendIndentedLine($"public {arg.type} {arg.name} = {RenderConfigPortableVars.DefaultValueFor(arg.type)}; // event data: {events}");
+                        }
                     }
 
                     foreach (var line in StringUtils.SplitIntoLinesOrEmpty(renderConfig.VariableDeclarations.Trim()))
@@ -281,6 +321,16 @@ public class AlgoBalanced1 : IGilAlgo
             file.AppendIndentedLine();
             file.AppendIndentedLine("// Variables. Can be used for inputs, outputs, user variables...");
             file.AppendIndentedLine("public Vars vars = new Vars();");
+        }
+
+        if (portable?.HasFunctions == true)
+        {
+            RunWithPossibleIndentation(() =>
+            {
+                file.AppendIndentedLine();
+                file.AppendIndentedLine("// Host. Set by the constructor. Diagram code calls its functions.");
+                file.AppendIndentedLine($"public {RenderConfigPortableVars.HostInterfaceName(mangler.SmTypeName)} {RenderConfigPortableVars.HostFieldName};");
+            });
         }
     }
 
@@ -305,7 +355,23 @@ public class AlgoBalanced1 : IGilAlgo
     /// </summary>
     private void OutputPortableTypes()
     {
-        if (portable == null || portable.Types.Trim().Length == 0)
+        if (portable == null)
+            return;
+
+        if (portable.HasFunctions)
+        {
+            file.AppendIndentedLine("// Host: what the state machine calls in the outside world (portable code).");
+            file.AppendIndented($"public interface {RenderConfigPortableVars.HostInterfaceName(mangler.SmTypeName)}");
+            file.StartCodeBlock();
+            foreach (var line in portable.FunctionLines())
+            {
+                file.AppendIndentedLine(line.Trim());
+            }
+            file.FinishCodeBlock();
+            file.AppendIndentedLine();
+        }
+
+        if (portable.Types.Trim().Length == 0)
             return;
 
         file.AppendIndentedLine("// User types (portable code)");
@@ -345,9 +411,20 @@ public class AlgoBalanced1 : IGilAlgo
     {
         file.AppendIndentedLine();
         file.AppendIndentedLine("// State machine constructor. Must be called before start or dispatch event functions. Not thread safe.");
-        file.AppendIndented($"public {mangler.SmTypeName}()");
-        file.StartCodeBlock();
-        file.FinishCodeBlock();
+        if (portable?.HasFunctions == true)
+        {
+            string host = RenderConfigPortableVars.HostFieldName;
+            file.AppendIndented($"public {mangler.SmTypeName}({RenderConfigPortableVars.HostInterfaceName(mangler.SmTypeName)} {host})");
+            file.StartCodeBlock();
+            file.AppendIndentedLine($"this.{host} = {host};");
+            file.FinishCodeBlock();
+        }
+        else
+        {
+            file.AppendIndented($"public {mangler.SmTypeName}()");
+            file.StartCodeBlock();
+            file.FinishCodeBlock();
+        }
         file.AppendIndentedLine();
     }
 
