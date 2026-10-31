@@ -35,10 +35,10 @@ pub const EVENT_ID_COUNT: usize = 18;
 pub enum StateId {
     #[default]
     ROOT = 0,
-    FAULT = 1,
-    OFF = 2,
-    ON = 3,
-    BREWING = 4,
+    OFF = 1,
+    ON = 2,
+    BREWING = 3,
+    FAULT = 4,
     IDLE = 5,
     STEAM = 6,
     STEAM_HEATING = 7,
@@ -50,10 +50,10 @@ pub const STATE_ID_COUNT: usize = 9;
 // Subtree meta data generation can be disabled in settings.
 // Details: https://github.com/StateSmith/StateSmith/issues/538
 pub const ROOT_SubtreeEndId: i32 = 8;  // State 'ManettaSm' subtree extends from itself (id: 0) to state 'STEAM_READY' (id: 8)
-pub const FAULT_SubtreeEndId: i32 = 1;  // State 'FAULT' subtree extends from itself (id: 1) to state 'FAULT' (id: 1)
-pub const OFF_SubtreeEndId: i32 = 2;  // State 'OFF' subtree extends from itself (id: 2) to state 'OFF' (id: 2)
-pub const ON_SubtreeEndId: i32 = 8;  // State 'ON' subtree extends from itself (id: 3) to state 'STEAM_READY' (id: 8)
-pub const BREWING_SubtreeEndId: i32 = 4;  // State 'BREWING' subtree extends from itself (id: 4) to state 'BREWING' (id: 4)
+pub const OFF_SubtreeEndId: i32 = 1;  // State 'OFF' subtree extends from itself (id: 1) to state 'OFF' (id: 1)
+pub const ON_SubtreeEndId: i32 = 8;  // State 'ON' subtree extends from itself (id: 2) to state 'STEAM_READY' (id: 8)
+pub const BREWING_SubtreeEndId: i32 = 3;  // State 'BREWING' subtree extends from itself (id: 3) to state 'BREWING' (id: 3)
+pub const FAULT_SubtreeEndId: i32 = 4;  // State 'FAULT' subtree extends from itself (id: 4) to state 'FAULT' (id: 4)
 pub const IDLE_SubtreeEndId: i32 = 5;  // State 'IDLE' subtree extends from itself (id: 5) to state 'IDLE' (id: 5)
 pub const STEAM_SubtreeEndId: i32 = 8;  // State 'STEAM' subtree extends from itself (id: 6) to state 'STEAM_READY' (id: 8)
 pub const STEAM_HEATING_SubtreeEndId: i32 = 7;  // State 'STEAM_HEATING' subtree extends from itself (id: 7) to state 'STEAM_HEATING' (id: 7)
@@ -64,7 +64,6 @@ pub trait ManettaSmHost {
     fn set_pump(&mut self, on: bool);              // brew pump
     fn set_power_relay(&mut self, on: bool);       // boiler power relay
     fn set_steam_heater(&mut self, on: bool);
-    fn power_relay_is_on(&mut self) -> bool;
 }
 
 
@@ -208,23 +207,6 @@ impl<H: ManettaSmHost> ManettaSm<H> {
                     EventId::PING => { self.root_ping(); }
                     EventId::STOP_BREW => { self.root_stop_brew(); }
                     EventId::LEAVE_STEAM => { self.root_leave_steam(); }
-                    EventId::FAULT_DETECTED => { self.root_fault_detected(); }
-                    _ => {}
-                }
-            }
-            
-            // STATE: FAULT
-            StateId::FAULT => {
-                match event_id {
-                    EventId::TURN_ON => { self.fault_turn_on(); }
-                    EventId::START_BREW => { self.fault_start_brew(); }
-                    EventId::ENTER_STEAM => { self.fault_enter_steam(); }
-                    EventId::TURN_OFF => { self.fault_turn_off(); }
-                    EventId::FAULT_DETECTED => { self.fault_fault_detected(); }
-                    EventId::FAULT_CLEARED => { self.fault_fault_cleared(); }
-                    EventId::PING => { self.root_ping(); } // First ancestor handler for this event
-                    EventId::STOP_BREW => { self.root_stop_brew(); } // First ancestor handler for this event
-                    EventId::LEAVE_STEAM => { self.root_leave_steam(); } // First ancestor handler for this event
                     _ => {}
                 }
             }
@@ -232,15 +214,16 @@ impl<H: ManettaSmHost> ManettaSm<H> {
             // STATE: OFF
             StateId::OFF => {
                 match event_id {
-                    EventId::TURN_OFF => { self.off_turn_off(); }
+                    EventId::TURN_ON => { self.off_turn_on(); }
                     EventId::START_BREW => { self.off_start_brew(); }
                     EventId::ENTER_STEAM => { self.off_enter_steam(); }
-                    EventId::TURN_ON => { self.off_turn_on(); }
+                    EventId::TURN_OFF => { self.off_turn_off(); }
+                    EventId::FAULT_DETECTED => { self.off_fault_detected(); }
+                    EventId::FAULT_CLEARED => { self.off_fault_cleared(); }
                     EventId::MACHINE_POWER_SWITCH => { self.off_machine_power_switch(); }
                     EventId::PING => { self.root_ping(); } // First ancestor handler for this event
                     EventId::STOP_BREW => { self.root_stop_brew(); } // First ancestor handler for this event
                     EventId::LEAVE_STEAM => { self.root_leave_steam(); } // First ancestor handler for this event
-                    EventId::FAULT_DETECTED => { self.root_fault_detected(); } // First ancestor handler for this event
                     _ => {}
                 }
             }
@@ -256,10 +239,11 @@ impl<H: ManettaSmHost> ManettaSm<H> {
                     EventId::TEMP_TOO_HOT => { self.on_temp_too_hot(); }
                     EventId::TURN_OFF => { self.on_turn_off(); }
                     EventId::MACHINE_POWER_SWITCH => { self.on_machine_power_switch(); }
+                    EventId::FAULT_DETECTED => { self.on_fault_detected(); }
+                    EventId::DO => { self.on_do(); }
                     EventId::PING => { self.root_ping(); } // First ancestor handler for this event
                     EventId::STOP_BREW => { self.root_stop_brew(); } // First ancestor handler for this event
                     EventId::LEAVE_STEAM => { self.root_leave_steam(); } // First ancestor handler for this event
-                    EventId::FAULT_DETECTED => { self.root_fault_detected(); } // First ancestor handler for this event
                     _ => {}
                 }
             }
@@ -276,12 +260,33 @@ impl<H: ManettaSmHost> ManettaSm<H> {
                     EventId::FAULT_DETECTED => { self.brewing_fault_detected(); }
                     EventId::PING => { self.root_ping(); } // First ancestor handler for this event
                     EventId::LEAVE_STEAM => { self.root_leave_steam(); } // First ancestor handler for this event
+                    EventId::TURN_ON => { self.on_turn_on(); } // First ancestor handler for this event
                     EventId::START_BREW => { self.on_start_brew(); } // First ancestor handler for this event
                     EventId::ENTER_STEAM => { self.on_enter_steam(); } // First ancestor handler for this event
-                    EventId::TURN_ON => { self.on_turn_on(); } // First ancestor handler for this event
                     EventId::TEMP_HEATING => { self.on_temp_heating(); } // First ancestor handler for this event
                     EventId::TEMP_READY => { self.on_temp_ready(); } // First ancestor handler for this event
                     EventId::TEMP_TOO_HOT => { self.on_temp_too_hot(); } // First ancestor handler for this event
+                    _ => {}
+                }
+            }
+            
+            // STATE: FAULT
+            StateId::FAULT => {
+                match event_id {
+                    EventId::TURN_ON => { self.fault_turn_on(); }
+                    EventId::START_BREW => { self.fault_start_brew(); }
+                    EventId::ENTER_STEAM => { self.fault_enter_steam(); }
+                    EventId::FAULT_DETECTED => { self.fault_fault_detected(); }
+                    EventId::FAULT_CLEARED => { self.fault_fault_cleared(); }
+                    EventId::PING => { self.root_ping(); } // First ancestor handler for this event
+                    EventId::STOP_BREW => { self.root_stop_brew(); } // First ancestor handler for this event
+                    EventId::LEAVE_STEAM => { self.root_leave_steam(); } // First ancestor handler for this event
+                    EventId::TURN_OFF => { self.on_turn_off(); } // First ancestor handler for this event
+                    EventId::MACHINE_POWER_SWITCH => { self.on_machine_power_switch(); } // First ancestor handler for this event
+                    EventId::TEMP_HEATING => { self.on_temp_heating(); } // First ancestor handler for this event
+                    EventId::TEMP_READY => { self.on_temp_ready(); } // First ancestor handler for this event
+                    EventId::TEMP_TOO_HOT => { self.on_temp_too_hot(); } // First ancestor handler for this event
+                    EventId::DO => { self.on_do(); } // First ancestor handler for this event
                     _ => {}
                 }
             }
@@ -293,17 +298,17 @@ impl<H: ManettaSmHost> ManettaSm<H> {
                     EventId::ENTER_STEAM => { self.idle_enter_steam(); }
                     EventId::MACHINE_BREW_SWITCH_ON => { self.idle_machine_brew_switch_on(); }
                     EventId::MACHINE_STEAM_BUTTON => { self.idle_machine_steam_button(); }
-                    EventId::DO => { self.idle_do(); }
                     EventId::PING => { self.root_ping(); } // First ancestor handler for this event
                     EventId::STOP_BREW => { self.root_stop_brew(); } // First ancestor handler for this event
                     EventId::LEAVE_STEAM => { self.root_leave_steam(); } // First ancestor handler for this event
-                    EventId::FAULT_DETECTED => { self.root_fault_detected(); } // First ancestor handler for this event
-                    EventId::TURN_OFF => { self.on_turn_off(); } // First ancestor handler for this event
                     EventId::TURN_ON => { self.on_turn_on(); } // First ancestor handler for this event
+                    EventId::TURN_OFF => { self.on_turn_off(); } // First ancestor handler for this event
+                    EventId::FAULT_DETECTED => { self.on_fault_detected(); } // First ancestor handler for this event
                     EventId::MACHINE_POWER_SWITCH => { self.on_machine_power_switch(); } // First ancestor handler for this event
                     EventId::TEMP_HEATING => { self.on_temp_heating(); } // First ancestor handler for this event
                     EventId::TEMP_READY => { self.on_temp_ready(); } // First ancestor handler for this event
                     EventId::TEMP_TOO_HOT => { self.on_temp_too_hot(); } // First ancestor handler for this event
+                    EventId::DO => { self.on_do(); } // First ancestor handler for this event
                     _ => {}
                 }
             }
@@ -320,10 +325,10 @@ impl<H: ManettaSmHost> ManettaSm<H> {
                     EventId::MACHINE_STEAM_BUTTON => { self.steam_machine_steam_button(); }
                     EventId::PING => { self.root_ping(); } // First ancestor handler for this event
                     EventId::STOP_BREW => { self.root_stop_brew(); } // First ancestor handler for this event
-                    EventId::FAULT_DETECTED => { self.root_fault_detected(); } // First ancestor handler for this event
-                    EventId::TURN_OFF => { self.on_turn_off(); } // First ancestor handler for this event
-                    EventId::START_BREW => { self.on_start_brew(); } // First ancestor handler for this event
                     EventId::TURN_ON => { self.on_turn_on(); } // First ancestor handler for this event
+                    EventId::START_BREW => { self.on_start_brew(); } // First ancestor handler for this event
+                    EventId::TURN_OFF => { self.on_turn_off(); } // First ancestor handler for this event
+                    EventId::FAULT_DETECTED => { self.on_fault_detected(); } // First ancestor handler for this event
                     EventId::MACHINE_POWER_SWITCH => { self.on_machine_power_switch(); } // First ancestor handler for this event
                     _ => {}
                 }
@@ -336,16 +341,16 @@ impl<H: ManettaSmHost> ManettaSm<H> {
                     EventId::PING => { self.root_ping(); } // First ancestor handler for this event
                     EventId::STOP_BREW => { self.root_stop_brew(); } // First ancestor handler for this event
                     EventId::LEAVE_STEAM => { self.steam_leave_steam(); } // First ancestor handler for this event
-                    EventId::FAULT_DETECTED => { self.root_fault_detected(); } // First ancestor handler for this event
-                    EventId::TURN_OFF => { self.on_turn_off(); } // First ancestor handler for this event
+                    EventId::TURN_ON => { self.on_turn_on(); } // First ancestor handler for this event
                     EventId::START_BREW => { self.on_start_brew(); } // First ancestor handler for this event
                     EventId::ENTER_STEAM => { self.steam_enter_steam(); } // First ancestor handler for this event
-                    EventId::TURN_ON => { self.on_turn_on(); } // First ancestor handler for this event
+                    EventId::TURN_OFF => { self.on_turn_off(); } // First ancestor handler for this event
+                    EventId::FAULT_DETECTED => { self.on_fault_detected(); } // First ancestor handler for this event
                     EventId::MACHINE_POWER_SWITCH => { self.on_machine_power_switch(); } // First ancestor handler for this event
                     EventId::TEMP_HEATING => { self.steam_temp_heating(); } // First ancestor handler for this event
                     EventId::TEMP_TOO_HOT => { self.steam_temp_too_hot(); } // First ancestor handler for this event
-                    EventId::MACHINE_STEAM_BUTTON => { self.steam_machine_steam_button(); } // First ancestor handler for this event
                     EventId::DO => { self.steam_do(); } // First ancestor handler for this event
+                    EventId::MACHINE_STEAM_BUTTON => { self.steam_machine_steam_button(); } // First ancestor handler for this event
                     _ => {}
                 }
             }
@@ -356,17 +361,17 @@ impl<H: ManettaSmHost> ManettaSm<H> {
                     EventId::PING => { self.root_ping(); } // First ancestor handler for this event
                     EventId::STOP_BREW => { self.root_stop_brew(); } // First ancestor handler for this event
                     EventId::LEAVE_STEAM => { self.steam_leave_steam(); } // First ancestor handler for this event
-                    EventId::FAULT_DETECTED => { self.root_fault_detected(); } // First ancestor handler for this event
-                    EventId::TURN_OFF => { self.on_turn_off(); } // First ancestor handler for this event
+                    EventId::TURN_ON => { self.on_turn_on(); } // First ancestor handler for this event
                     EventId::START_BREW => { self.on_start_brew(); } // First ancestor handler for this event
                     EventId::ENTER_STEAM => { self.steam_enter_steam(); } // First ancestor handler for this event
-                    EventId::TURN_ON => { self.on_turn_on(); } // First ancestor handler for this event
+                    EventId::TURN_OFF => { self.on_turn_off(); } // First ancestor handler for this event
+                    EventId::FAULT_DETECTED => { self.on_fault_detected(); } // First ancestor handler for this event
                     EventId::MACHINE_POWER_SWITCH => { self.on_machine_power_switch(); } // First ancestor handler for this event
                     EventId::TEMP_HEATING => { self.steam_temp_heating(); } // First ancestor handler for this event
                     EventId::TEMP_READY => { self.steam_temp_ready(); } // First ancestor handler for this event
                     EventId::TEMP_TOO_HOT => { self.steam_temp_too_hot(); } // First ancestor handler for this event
-                    EventId::MACHINE_STEAM_BUTTON => { self.steam_machine_steam_button(); } // First ancestor handler for this event
                     EventId::DO => { self.steam_do(); } // First ancestor handler for this event
+                    EventId::MACHINE_STEAM_BUTTON => { self.steam_machine_steam_button(); } // First ancestor handler for this event
                     _ => {}
                 }
             }
@@ -391,13 +396,13 @@ impl<H: ManettaSmHost> ManettaSm<H> {
     fn exit_up_to_state_handler(&mut self, desired_state: StateId) {
         while self.state_id != desired_state {
             match self.state_id {
-                StateId::FAULT => { self.fault_exit(); }
-                
                 StateId::OFF => { self.off_exit(); }
                 
                 StateId::ON => { self.on_exit(); }
                 
                 StateId::BREWING => { self.brewing_exit(); }
+                
+                StateId::FAULT => { self.fault_exit(); }
                 
                 StateId::IDLE => { self.idle_exit(); }
                 
@@ -421,24 +426,6 @@ impl<H: ManettaSmHost> ManettaSm<H> {
         self.state_id = StateId::ROOT;
     }
     
-    fn root_fault_detected(&mut self) {
-        // ROOT behavior
-        // uml: FAULT_DETECTED TransitionTo(FAULT)
-        {
-            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
-            self.exit_up_to_state_handler(StateId::ROOT);
-            
-            // Step 2: Transition action: ``.
-            
-            // Step 3: Enter/move towards transition target `FAULT`.
-            self.fault_enter();
-            
-            // Step 4: complete transition. Ends event dispatch. No other behaviors are checked.
-            return;
-        } // end of behavior for ROOT
-        
-        // No ancestor handles this event.
-    }    
     fn root_leave_steam(&mut self) {
         // ROOT behavior
         // uml: LEAVE_STEAM / { reply = Reply.OK; }
@@ -471,133 +458,6 @@ impl<H: ManettaSmHost> ManettaSm<H> {
     }    
     
     ////////////////////////////////////////////////////////////////////////////////
-    // event handlers for state FAULT
-    ////////////////////////////////////////////////////////////////////////////////
-    
-    fn fault_enter(&mut self) {
-        self.state_id = StateId::FAULT;
-        
-        // FAULT behavior
-        // uml: enter / { phase = Phase.FAULT; }
-        {
-            // Step 1: execute action `phase = Phase.FAULT;`
-            self.vars.phase = Phase::FAULT;
-        } // end of behavior for FAULT
-    }
-    
-    fn fault_exit(&mut self) {
-        // FAULT behavior
-        // uml: exit / { phase = Phase.IDLE; }
-        {
-            // Step 1: execute action `phase = Phase.IDLE;`
-            self.vars.phase = Phase::IDLE;
-        } // end of behavior for FAULT
-        
-        self.state_id = StateId::ROOT;
-    }
-    
-    fn fault_enter_steam(&mut self) {
-        // FAULT behavior
-        // uml: (TURN_ON, START_BREW, ENTER_STEAM) / { reply = Reply.FAULT; }
-        {
-            // Step 1: execute action `reply = Reply.FAULT;`
-            self.vars.reply = Reply::FAULT;
-        } // end of behavior for FAULT
-        
-        // No ancestor handles this event.
-    }    
-    fn fault_fault_cleared(&mut self) {
-        // FAULT behavior
-        // uml: FAULT_CLEARED TransitionTo(ROOT.<ChoicePoint>(AFTER_FAULT))
-        {
-            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
-            self.fault_exit();
-            
-            // Step 2: Transition action: ``.
-            
-            // Step 3: Enter/move towards transition target `ROOT.<ChoicePoint>(AFTER_FAULT)`.
-            // ROOT.<ChoicePoint>(AFTER_FAULT) is a pseudo state and cannot have an `enter` trigger.
-            
-            // ROOT.<ChoicePoint>(AFTER_FAULT) behavior
-            // uml: [power_relay_is_on()] TransitionTo(ON)
-            if self.host.power_relay_is_on() {
-                // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition). Already at LCA, no exiting required.
-                
-                // Step 2: Transition action: ``.
-                
-                // Step 3: Enter/move towards transition target `ON`.
-                self.on_enter();
-                
-                // Finish transition by calling pseudo state transition function.
-                self.ON_InitialState_transition();
-                return; // event processing immediately stops when a transition finishes. No other behaviors for this state are checked.
-            } // end of behavior for ROOT.<ChoicePoint>(AFTER_FAULT)
-            
-            // ROOT.<ChoicePoint>(AFTER_FAULT) behavior
-            // uml: else TransitionTo(OFF)
-            {
-                // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition). Already at LCA, no exiting required.
-                
-                // Step 2: Transition action: ``.
-                
-                // Step 3: Enter/move towards transition target `OFF`.
-                self.off_enter();
-                
-                // Step 4: complete transition. Ends event dispatch. No other behaviors are checked.
-                return;
-            } // end of behavior for ROOT.<ChoicePoint>(AFTER_FAULT)
-        } // end of behavior for FAULT
-        
-        // No ancestor handles this event.
-    }    
-    fn fault_fault_detected(&mut self) {
-        let mut consume_event: bool = false;
-        
-        // FAULT behavior
-        // uml: FAULT_DETECTED
-        {
-            // Consume event `fault_detected`.
-            consume_event = true;
-            // Step 1: execute action ``
-        } // end of behavior for FAULT
-        
-        // Check if event has been consumed before calling ancestor handler.
-        if !consume_event {
-            self.root_fault_detected();
-        }
-    }    
-    fn fault_start_brew(&mut self) {
-        // FAULT behavior
-        // uml: (TURN_ON, START_BREW, ENTER_STEAM) / { reply = Reply.FAULT; }
-        {
-            // Step 1: execute action `reply = Reply.FAULT;`
-            self.vars.reply = Reply::FAULT;
-        } // end of behavior for FAULT
-        
-        // No ancestor handles this event.
-    }    
-    fn fault_turn_off(&mut self) {
-        // FAULT behavior
-        // uml: TURN_OFF / { reply = Reply.OK; set_power_relay(false); power = Power.OFF; }
-        {
-            // Step 1: execute action `reply = Reply.OK; set_power_relay(false); power = Power.OFF;`
-            self.vars.reply = Reply::OK; self.host.set_power_relay(false); self.vars.power = Power::OFF;
-        } // end of behavior for FAULT
-        
-        // No ancestor handles this event.
-    }    
-    fn fault_turn_on(&mut self) {
-        // FAULT behavior
-        // uml: (TURN_ON, START_BREW, ENTER_STEAM) / { reply = Reply.FAULT; }
-        {
-            // Step 1: execute action `reply = Reply.FAULT;`
-            self.vars.reply = Reply::FAULT;
-        } // end of behavior for FAULT
-        
-        // No ancestor handles this event.
-    }    
-    
-    ////////////////////////////////////////////////////////////////////////////////
     // event handlers for state OFF
     ////////////////////////////////////////////////////////////////////////////////
     
@@ -618,18 +478,45 @@ impl<H: ManettaSmHost> ManettaSm<H> {
     
     fn off_enter_steam(&mut self) {
         // OFF behavior
-        // uml: (START_BREW, ENTER_STEAM) / { reply = Reply.NOT_READY; }
-        {
+        // uml: 1.( TURN_ON, START_BREW, ENTER_STEAM) [phase == Phase.FAULT] / { reply = Reply.FAULT; }
+        if self.vars.phase == Phase::FAULT {
+            // Step 1: execute action `reply = Reply.FAULT;`
+            self.vars.reply = Reply::FAULT;
+        } // end of behavior for OFF
+        
+        // OFF behavior
+        // uml: 2.( START_BREW, ENTER_STEAM) [phase != Phase.FAULT] / { reply = Reply.NOT_READY; }
+        if self.vars.phase != Phase::FAULT {
             // Step 1: execute action `reply = Reply.NOT_READY;`
             self.vars.reply = Reply::NOT_READY;
         } // end of behavior for OFF
         
         // No ancestor handles this event.
     }    
+    fn off_fault_cleared(&mut self) {
+        // OFF behavior
+        // uml: FAULT_CLEARED / { phase = Phase.IDLE; }
+        {
+            // Step 1: execute action `phase = Phase.IDLE;`
+            self.vars.phase = Phase::IDLE;
+        } // end of behavior for OFF
+        
+        // No ancestor handles this event.
+    }    
+    fn off_fault_detected(&mut self) {
+        // OFF behavior
+        // uml: FAULT_DETECTED / { phase = Phase.FAULT; }
+        {
+            // Step 1: execute action `phase = Phase.FAULT;`
+            self.vars.phase = Phase::FAULT;
+        } // end of behavior for OFF
+        
+        // No ancestor handles this event.
+    }    
     fn off_machine_power_switch(&mut self) {
         // OFF behavior
-        // uml: MACHINE_POWER_SWITCH TransitionTo(ON)
-        {
+        // uml: MACHINE_POWER_SWITCH [phase != Phase.FAULT] TransitionTo(ON)
+        if self.vars.phase != Phase::FAULT {
             // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
             self.off_exit();
             
@@ -647,8 +534,15 @@ impl<H: ManettaSmHost> ManettaSm<H> {
     }    
     fn off_start_brew(&mut self) {
         // OFF behavior
-        // uml: (START_BREW, ENTER_STEAM) / { reply = Reply.NOT_READY; }
-        {
+        // uml: 1.( TURN_ON, START_BREW, ENTER_STEAM) [phase == Phase.FAULT] / { reply = Reply.FAULT; }
+        if self.vars.phase == Phase::FAULT {
+            // Step 1: execute action `reply = Reply.FAULT;`
+            self.vars.reply = Reply::FAULT;
+        } // end of behavior for OFF
+        
+        // OFF behavior
+        // uml: 2.( START_BREW, ENTER_STEAM) [phase != Phase.FAULT] / { reply = Reply.NOT_READY; }
+        if self.vars.phase != Phase::FAULT {
             // Step 1: execute action `reply = Reply.NOT_READY;`
             self.vars.reply = Reply::NOT_READY;
         } // end of behavior for OFF
@@ -667,8 +561,15 @@ impl<H: ManettaSmHost> ManettaSm<H> {
     }    
     fn off_turn_on(&mut self) {
         // OFF behavior
-        // uml: TURN_ON / { reply = Reply.OK; } TransitionTo(ON)
-        {
+        // uml: 1.( TURN_ON, START_BREW, ENTER_STEAM) [phase == Phase.FAULT] / { reply = Reply.FAULT; }
+        if self.vars.phase == Phase::FAULT {
+            // Step 1: execute action `reply = Reply.FAULT;`
+            self.vars.reply = Reply::FAULT;
+        } // end of behavior for OFF
+        
+        // OFF behavior
+        // uml: 3. TURN_ON [phase != Phase.FAULT] / { reply = Reply.OK; } TransitionTo(ON)
+        if self.vars.phase != Phase::FAULT {
             // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
             self.off_exit();
             
@@ -705,12 +606,48 @@ impl<H: ManettaSmHost> ManettaSm<H> {
         self.state_id = StateId::ROOT;
     }
     
+    fn on_do(&mut self) {
+        // ON behavior
+        // uml: do [phase != Phase.BREWING && elapsed(auto_off_from) >= auto_off_min * 60000] TransitionTo(OFF)
+        if self.vars.phase != Phase::BREWING && (self.vars.now_ms.wrapping_sub(self.vars.auto_off_from)) >= self.vars.auto_off_min.wrapping_mul(60000) {
+            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
+            self.exit_up_to_state_handler(StateId::ROOT);
+            
+            // Step 2: Transition action: ``.
+            
+            // Step 3: Enter/move towards transition target `OFF`.
+            self.off_enter();
+            
+            // Step 4: complete transition. Ends event dispatch. No other behaviors are checked.
+            return;
+        } // end of behavior for ON
+        
+        // No ancestor handles this event.
+    }    
     fn on_enter_steam(&mut self) {
         // ON behavior
         // uml: (START_BREW, ENTER_STEAM) / { reply = Reply.BUSY; }
         {
             // Step 1: execute action `reply = Reply.BUSY;`
             self.vars.reply = Reply::BUSY;
+        } // end of behavior for ON
+        
+        // No ancestor handles this event.
+    }    
+    fn on_fault_detected(&mut self) {
+        // ON behavior
+        // uml: FAULT_DETECTED TransitionTo(FAULT)
+        {
+            // Step 1: Exit states until we reach `ON` state (Least Common Ancestor for transition).
+            self.exit_up_to_state_handler(StateId::ON);
+            
+            // Step 2: Transition action: ``.
+            
+            // Step 3: Enter/move towards transition target `FAULT`.
+            self.fault_enter();
+            
+            // Step 4: complete transition. Ends event dispatch. No other behaviors are checked.
+            return;
         } // end of behavior for ON
         
         // No ancestor handles this event.
@@ -853,6 +790,8 @@ impl<H: ManettaSmHost> ManettaSm<H> {
     }
     
     fn brewing_do(&mut self) {
+        let mut consume_event: bool = false;
+        
         // BREWING behavior
         // uml: 1. do [after(brew_cmd_max_ms) && (start_source == StartSource.APP)] / { stop_reason = StopReason.COMMAND_CAP; } TransitionTo(IDLE)
         if ((self.vars.now_ms.wrapping_sub(self.vars.BREWING_entered_at)) >= self.vars.brew_cmd_max_ms) && (self.vars.start_source == StartSource::APP) {
@@ -901,7 +840,10 @@ impl<H: ManettaSmHost> ManettaSm<H> {
             return;
         } // end of behavior for BREWING
         
-        // No ancestor handles this event.
+        // Check if event has been consumed before calling ancestor handler.
+        if !consume_event {
+            self.on_do();
+        }
     }    
     fn brewing_fault_detected(&mut self) {
         let mut consume_event: bool = false;
@@ -909,8 +851,8 @@ impl<H: ManettaSmHost> ManettaSm<H> {
         // BREWING behavior
         // uml: FAULT_DETECTED / { stop_reason = StopReason.FAULT; } TransitionTo(FAULT)
         {
-            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
-            self.exit_up_to_state_handler(StateId::ROOT);
+            // Step 1: Exit states until we reach `ON` state (Least Common Ancestor for transition).
+            self.brewing_exit();
             
             // Step 2: Transition action: `stop_reason = StopReason.FAULT;`.
             self.vars.stop_reason = StopReason::FAULT;
@@ -924,7 +866,7 @@ impl<H: ManettaSmHost> ManettaSm<H> {
         
         // Check if event has been consumed before calling ancestor handler.
         if !consume_event {
-            self.root_fault_detected();
+            self.on_fault_detected();
         }
     }    
     fn brewing_link_lost(&mut self) {
@@ -1032,6 +974,112 @@ impl<H: ManettaSmHost> ManettaSm<H> {
     }    
     
     ////////////////////////////////////////////////////////////////////////////////
+    // event handlers for state FAULT
+    ////////////////////////////////////////////////////////////////////////////////
+    
+    fn fault_enter(&mut self) {
+        self.state_id = StateId::FAULT;
+        
+        // FAULT behavior
+        // uml: enter / { phase = Phase.FAULT; }
+        {
+            // Step 1: execute action `phase = Phase.FAULT;`
+            self.vars.phase = Phase::FAULT;
+        } // end of behavior for FAULT
+    }
+    
+    fn fault_exit(&mut self) {
+        self.state_id = StateId::ON;
+    }
+    
+    fn fault_enter_steam(&mut self) {
+        let mut consume_event: bool = false;
+        
+        // FAULT behavior
+        // uml: (TURN_ON, START_BREW, ENTER_STEAM) / { reply = Reply.FAULT; }
+        {
+            // Consume event `enter_steam`.
+            consume_event = true;
+            // Step 1: execute action `reply = Reply.FAULT;`
+            self.vars.reply = Reply::FAULT;
+        } // end of behavior for FAULT
+        
+        // Check if event has been consumed before calling ancestor handler.
+        if !consume_event {
+            self.on_enter_steam();
+        }
+    }    
+    fn fault_fault_cleared(&mut self) {
+        // FAULT behavior
+        // uml: FAULT_CLEARED / { phase = Phase.IDLE; } TransitionTo(IDLE)
+        {
+            // Step 1: Exit states until we reach `ON` state (Least Common Ancestor for transition).
+            self.fault_exit();
+            
+            // Step 2: Transition action: `phase = Phase.IDLE;`.
+            self.vars.phase = Phase::IDLE;
+            
+            // Step 3: Enter/move towards transition target `IDLE`.
+            self.idle_enter();
+            
+            // Step 4: complete transition. Ends event dispatch. No other behaviors are checked.
+            return;
+        } // end of behavior for FAULT
+        
+        // No ancestor handles this event.
+    }    
+    fn fault_fault_detected(&mut self) {
+        let mut consume_event: bool = false;
+        
+        // FAULT behavior
+        // uml: FAULT_DETECTED
+        {
+            // Consume event `fault_detected`.
+            consume_event = true;
+            // Step 1: execute action ``
+        } // end of behavior for FAULT
+        
+        // Check if event has been consumed before calling ancestor handler.
+        if !consume_event {
+            self.on_fault_detected();
+        }
+    }    
+    fn fault_start_brew(&mut self) {
+        let mut consume_event: bool = false;
+        
+        // FAULT behavior
+        // uml: (TURN_ON, START_BREW, ENTER_STEAM) / { reply = Reply.FAULT; }
+        {
+            // Consume event `start_brew`.
+            consume_event = true;
+            // Step 1: execute action `reply = Reply.FAULT;`
+            self.vars.reply = Reply::FAULT;
+        } // end of behavior for FAULT
+        
+        // Check if event has been consumed before calling ancestor handler.
+        if !consume_event {
+            self.on_start_brew();
+        }
+    }    
+    fn fault_turn_on(&mut self) {
+        let mut consume_event: bool = false;
+        
+        // FAULT behavior
+        // uml: (TURN_ON, START_BREW, ENTER_STEAM) / { reply = Reply.FAULT; }
+        {
+            // Consume event `turn_on`.
+            consume_event = true;
+            // Step 1: execute action `reply = Reply.FAULT;`
+            self.vars.reply = Reply::FAULT;
+        } // end of behavior for FAULT
+        
+        // Check if event has been consumed before calling ancestor handler.
+        if !consume_event {
+            self.on_turn_on();
+        }
+    }    
+    
+    ////////////////////////////////////////////////////////////////////////////////
     // event handlers for state IDLE
     ////////////////////////////////////////////////////////////////////////////////
     
@@ -1043,24 +1091,6 @@ impl<H: ManettaSmHost> ManettaSm<H> {
         self.state_id = StateId::ON;
     }
     
-    fn idle_do(&mut self) {
-        // IDLE behavior
-        // uml: do [elapsed(auto_off_from) >= auto_off_min * 60000] TransitionTo(OFF)
-        if (self.vars.now_ms.wrapping_sub(self.vars.auto_off_from)) >= self.vars.auto_off_min.wrapping_mul(60000) {
-            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
-            self.exit_up_to_state_handler(StateId::ROOT);
-            
-            // Step 2: Transition action: ``.
-            
-            // Step 3: Enter/move towards transition target `OFF`.
-            self.off_enter();
-            
-            // Step 4: complete transition. Ends event dispatch. No other behaviors are checked.
-            return;
-        } // end of behavior for IDLE
-        
-        // No ancestor handles this event.
-    }    
     fn idle_enter_steam(&mut self) {
         let mut consume_event: bool = false;
         
@@ -1220,6 +1250,8 @@ impl<H: ManettaSmHost> ManettaSm<H> {
     }
     
     fn steam_do(&mut self) {
+        let mut consume_event: bool = false;
+        
         // STEAM behavior
         // uml: 1. do [elapsed(steam_cmd_at) >= steam_cmd_max_ms] TransitionTo(IDLE)
         if (self.vars.now_ms.wrapping_sub(self.vars.steam_cmd_at)) >= self.vars.steam_cmd_max_ms {
@@ -1250,22 +1282,10 @@ impl<H: ManettaSmHost> ManettaSm<H> {
             return;
         } // end of behavior for STEAM
         
-        // STEAM behavior
-        // uml: 3. do [elapsed(auto_off_from) >= auto_off_min * 60000] TransitionTo(OFF)
-        if (self.vars.now_ms.wrapping_sub(self.vars.auto_off_from)) >= self.vars.auto_off_min.wrapping_mul(60000) {
-            // Step 1: Exit states until we reach `ROOT` state (Least Common Ancestor for transition).
-            self.exit_up_to_state_handler(StateId::ROOT);
-            
-            // Step 2: Transition action: ``.
-            
-            // Step 3: Enter/move towards transition target `OFF`.
-            self.off_enter();
-            
-            // Step 4: complete transition. Ends event dispatch. No other behaviors are checked.
-            return;
-        } // end of behavior for STEAM
-        
-        // No ancestor handles this event.
+        // Check if event has been consumed before calling ancestor handler.
+        if !consume_event {
+            self.on_do();
+        }
     }    
     fn steam_enter_steam(&mut self) {
         let mut consume_event: bool = false;
@@ -1470,8 +1490,8 @@ impl<H: ManettaSmHost> ManettaSm<H> {
         let mut elapsed: u32 = 0;
         let mut duration: u32 = 0;
         
-        // IDLE
-        if self.state_id == StateId::IDLE {
+        // ON and its sub states
+        if self.state_id >= StateId::ON && self.state_id <= StateId::STEAM_READY {
             elapsed = self.vars.now_ms.wrapping_sub(self.vars.auto_off_from);
             duration = self.vars.auto_off_min.wrapping_mul(60000);
             if elapsed < duration && duration.wrapping_sub(elapsed) < best {
@@ -1510,11 +1530,6 @@ impl<H: ManettaSmHost> ManettaSm<H> {
             if elapsed < duration && duration.wrapping_sub(elapsed) < best {
                 best = duration.wrapping_sub(elapsed);
             }
-            elapsed = self.vars.now_ms.wrapping_sub(self.vars.auto_off_from);
-            duration = self.vars.auto_off_min.wrapping_mul(60000);
-            if elapsed < duration && duration.wrapping_sub(elapsed) < best {
-                best = duration.wrapping_sub(elapsed);
-            }
         }
         
         return best;
@@ -1525,10 +1540,10 @@ impl<H: ManettaSmHost> ManettaSm<H> {
 pub const fn state_id_to_string(id: StateId) -> &'static str {
     match id {
         StateId::ROOT => { return "ROOT"; }
-        StateId::FAULT => { return "FAULT"; }
         StateId::OFF => { return "OFF"; }
         StateId::ON => { return "ON"; }
         StateId::BREWING => { return "BREWING"; }
+        StateId::FAULT => { return "FAULT"; }
         StateId::IDLE => { return "IDLE"; }
         StateId::STEAM => { return "STEAM"; }
         StateId::STEAM_HEATING => { return "STEAM_HEATING"; }
@@ -1565,10 +1580,10 @@ pub const fn event_id_to_string(id: EventId) -> &'static str {
 pub const fn get_parent_id(id: StateId) -> StateId {
     match id {
         StateId::ROOT => { return StateId::ROOT; }
-        StateId::FAULT => { return StateId::ROOT; }
         StateId::OFF => { return StateId::ROOT; }
         StateId::ON => { return StateId::ROOT; }
         StateId::BREWING => { return StateId::ON; }
+        StateId::FAULT => { return StateId::ON; }
         StateId::IDLE => { return StateId::ON; }
         StateId::STEAM => { return StateId::ON; }
         StateId::STEAM_HEATING => { return StateId::STEAM; }

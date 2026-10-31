@@ -8,17 +8,17 @@ A cut-down Manetta device state machine, drawn once in PlantUML and generated tw
 > The diagram declares its own types and variables, and all diagram code is translated per language, so there is **no per-language glue at all**.
 > The expansion-based first version is on branch `manetta-example`. Its trace is byte-identical to this one.
 
-Both runners play the same `scenarios.txt` and print the same trace. **The two traces are byte-identical** (140 lines, 12 scenarios).
+Both runners play the same `scenarios.txt` and print the same trace. **The two traces are byte-identical** (205 lines, 18 scenarios).
 The Rust module also builds as `#![no_std]` for `riscv32imc-unknown-none-elf`.
 
 | | Result |
 |---|---|
 | Same diagram text for both languages | yes, and nothing else: types, variables and code are all in `ManettaSm.plantuml`. The generator only picks the target |
 | Rust trace == TypeScript trace | **identical** (`diff trace-rust.txt trace-ts.txt` is empty; checked by `ManettaExampleGenTests.RustAndTypeScriptTracesMatch`) |
-| Low-power host (`--sleep`: sleep until `next_deadline_ms()` instead of a 100 ms `do` tick) | same trace in both languages, **25 `do` dispatches instead of 2,190** |
+| Low-power host (`--sleep`: sleep until `next_deadline_ms()` instead of a 100 ms `do` tick) | same trace in both languages, **29 `do` dispatches instead of 2,850** |
 | Rust warnings | 0 rustc and 0 clippy warnings for the runner crate and the no_std crate |
 | TypeScript | `tsc` 6.0 with `strict`, target ES2020: no errors |
-| no_std, `riscv32imc-unknown-none-elf`, `opt-level = "s"` | builds. Whole crate object: **2,430 B `.text`** (including an exported `next_deadline_ms()` call and a GPIO-style host), 0 data, 0 bss. The only external symbol is `memset` (from `compiler_builtins`) |
+| no_std, `riscv32imc-unknown-none-elf`, `opt-level = "s"` | builds. Whole crate object: **2,372 B `.text`** (including an exported `next_deadline_ms()` call and a GPIO-style host), 0 data, 0 bss. The only external symbol is `memset` (from `compiler_builtins`) |
 
 ## The diagram
 
@@ -32,25 +32,26 @@ Source: [`ManettaSm.plantuml`](ManettaSm.plantuml). Rendered with PlantUML 1.202
 ### Structure
 
 ```
-ManettaSm (the machine)      PING / STOP_BREW / LEAVE_STEAM answer OK; FAULT_DETECTED -> FAULT
-├── OFF                      relay off. START_BREW, ENTER_STEAM -> NOT_READY
-├── ON                       relay on. TEMP_* events update `power`; START_BREW, ENTER_STEAM default to BUSY
-│   ├── IDLE                 starts brews and steam; auto-off
-│   ├── BREWING              pump on; command cap, device cap, heartbeat, STOP_BREW, machine switch, link loss, fault
-│   └── STEAM                steam heater on, power reports ON; caps, LEAVE_STEAM, button, auto-off
-│       ├── STEAM_HEATING
-│       └── STEAM_READY
-├── FAULT                    stays until FAULT_CLEARED
-└── AFTER_FAULT (choice)     back to ON if the relay is still on, else OFF
+ManettaSm (the machine)      PING / STOP_BREW / LEAVE_STEAM answer OK
+├── OFF                      relay off. START_BREW, ENTER_STEAM -> NOT_READY; a fault while off is `phase == FAULT` (no state change)
+└── ON                       relay on. TEMP_* update `power`; TURN_OFF, power switch, auto-off (not while brewing); FAULT_DETECTED -> FAULT
+    ├── IDLE                 starts brews and steam
+    ├── BREWING              pump on; command cap, device cap, heartbeat, STOP_BREW, machine switch, link loss, fault
+    ├── STEAM                steam heater on, power reports ON; caps, LEAVE_STEAM, button
+    │   ├── STEAM_HEATING
+    │   └── STEAM_READY
+    └── FAULT                START_BREW / ENTER_STEAM / TURN_ON -> FAULT; FAULT_CLEARED -> IDLE
 ```
 
 Changes from the suggested hierarchy, and why:
-- **Behaviours on the machine itself.** The "true everywhere" answers (PING, STOP_BREW and LEAVE_STEAM are always OK, and a fault from
-  anywhere goes to FAULT) are written on the root: `ManettaSm : PING / reply = Reply.OK;`. The picture draws them as a small `ManettaSm` box.
+- **Behaviours on the machine itself.** The "true everywhere" answers (PING, STOP_BREW and LEAVE_STEAM are always OK) are written on the root: `ManettaSm : PING / reply = Reply.OK;`. The picture draws them as a small `ManettaSm` box.
   Stock StateSmith can't do this from PlantUML; this branch maps the machine's name to the root.
   The earlier versions needed an outer `MANETTA` wrapper state instead.
-- **FAULT is a sibling of OFF and ON, not inside ON.** A fault can be detected while off. TURN_OFF must still work during a fault,
-  and it decides whether clearing the fault returns to ON or OFF.
+- **A fault sits beside the power state instead of replacing it.**
+  - **While on,** FAULT is a sub state of ON, next to IDLE, BREWING and STEAM. Everything ON does keeps working during a fault: auto-off, temperature (`power`), TURN_OFF and the machine's power switch.
+  - **While off,** the machine stays in OFF and `phase` reports FAULT. `phase == Phase.FAULT` is the one fault flag; only FAULT_CLEARED resets it, so a fault survives turning off.
+  - An earlier version made FAULT a sibling of OFF and ON. Entering it left ON, which silently stopped auto-off, froze `power` and ignored the power switch.
+    It also needed a choice point plus a `power_relay_is_on()` host query to work out where to go when the fault cleared. See "Fault restructure" below.
 - **Temperature is not a state.** HEATING, READY and COOLING run in parallel with everything else, so they are the `power`
   variable, set by `TEMP_*` handlers on ON. STEAM overrides those handlers, because in steam mode power reports ON.
   Auto-off is a timestamp plus a `do` guard.
@@ -68,7 +69,7 @@ enum Power { OFF, HEATING, READY, COOLING, ON }
 """
 Functions = """
 void set_pump(bool on);              // brew pump
-bool power_relay_is_on();
+void set_power_relay(bool on);
 ...
 """
 Events = """
@@ -97,7 +98,7 @@ How the pieces fit:
   The runners import them from the generated module.
 - **`after()`** makes StateSmith add a `BREWING_entered_at` variable and an entry action that stamps it.
   `BREWING --> IDLE : 1. after(brew_cmd_max_ms) [start_source == StartSource.APP] / ...` is a trigger; it's checked on each `do`.
-- **Host functions** (`[RenderConfig.Portable] Functions`) are how the machine touches hardware: `set_pump(true);`, `[power_relay_is_on()]`.
+- **Host functions** (`[RenderConfig.Portable] Functions`) are how the machine touches hardware: `set_pump(true);`, `set_power_relay(false);`.
   Rust gets a `ManettaSmHost` trait, and the machine is generic over it (`ManettaSm<H: ManettaSmHost>`, `const fn new(host)`). TypeScript gets an interface passed to the constructor.
   The runners use a `TraceHost` that records the outputs; the no_std crate uses a GPIO-style `BoardHost`.
 - **Event data** (`[RenderConfig.Portable] Events`): `START_BREW(uint max_ms)` generates `dispatch_start_brew(max_ms)` (TS `dispatchStartBrew`), and diagram code reads `max_ms`.
@@ -192,12 +193,17 @@ Choices made where the scope left room:
 - **The steam button:** toggles steam (entering it needs `power != Power.HEATING`). A button-started steam's command cap is the device cap.
 - **The power switch:** toggles power. During a brew it stops the brew with `MACHINE`.
 - **TURN_ON while already on:** OK, and it restarts the auto-off clock ("the later of the last TURN_ON and the end of the last brew").
-- **Auto-off:** fires from IDLE and from STEAM (steam doesn't hold it off), never from BREWING.
+- **Auto-off:** one check on ON, `do [phase != Phase.BREWING && elapsed(auto_off_from) >= auto_off_min * 60000]`.
+  It fires from IDLE, STEAM (steam doesn't hold it off) and FAULT (SPEC 5.9 doesn't exempt faults), never during a brew.
 - **Faults:**
   - a fault leaves the power relay as it was;
   - pump and steam heater go off through BREWING and STEAM's exit actions;
-  - in FAULT, TURN_ON, START_BREW and ENTER_STEAM get FAULT, while TURN_OFF, STOP_BREW, LEAVE_STEAM and PING get OK;
-  - after a fault clears back to ON, `power` reports HEATING until the next `TEMP_*` event.
+  - during a fault, START_BREW, ENTER_STEAM and TURN_ON get FAULT; TURN_OFF, STOP_BREW, LEAVE_STEAM and PING get OK;
+  - TURN_OFF and the power switch turn the machine off with the fault still active; clearing the fault then leaves it off;
+  - clearing a fault while on goes to IDLE without re-entering ON, so `power` keeps reporting the real temperature.
+- **TURN_ON during a fault while off: refused** (reply FAULT, stays off). The machine's own power switch is ignored too.
+  Energising the heater of a machine that reports a fault is the unsafe choice, and it matches the answer while on (TURN_ON gets FAULT there too).
+  Once the fault clears, both work again.
 - **`stop_reason`** is only set for brews. How steam ended is not reported; the scope only lists brew reasons.
 - **`Reply::NONE`:** an extra value. The host resets `reply` before each command, so "no answer" would be visible (it never happens in the traces).
   `StopReason::NONE` and `StartSource::NONE` are the initial values.
@@ -312,7 +318,7 @@ t=   2.0s | waited 2000 ms             | reply=-         | BREWING        phase=
 t=   2.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
 t=   2.0s | cmd START_BREW             | reply=FAULT     | FAULT          phase=FAULT   power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
 t=   2.0s | cmd TURN_ON                | reply=FAULT     | FAULT          phase=FAULT   power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
-t=   2.0s | ev FAULT_CLEARED           | reply=-         | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
+t=   2.0s | ev FAULT_CLEARED           | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
 t=   2.0s | ev TEMP_READY              | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
 t=   2.0s | cmd START_BREW             | reply=OK        | BREWING        phase=BREWING power=READY   steam=OFF     stop=NONE        src=APP     pump=1 relay=1 steam_on=0
 t=   2.0s | cmd STOP_BREW              | reply=OK        | IDLE           phase=IDLE    power=READY   steam=OFF     stop=APP         src=APP     pump=0 relay=1 steam_on=0
@@ -350,13 +356,78 @@ t=   0.0s | ev LINK_LOST               | reply=-         | IDLE           phase=
 
 == 12. a fault while off, TURN_OFF in fault, clearing back to off
 t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
-t=   0.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
-t=   0.0s | cmd TURN_OFF               | reply=OK        | FAULT          phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_OFF               | reply=OK        | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
 t=   0.0s | ev FAULT_CLEARED           | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
 t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
 t=   0.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
-t=   0.0s | cmd TURN_OFF               | reply=OK        | FAULT          phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_OFF               | reply=OK        | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
 t=   0.0s | ev FAULT_CLEARED           | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+
+== 13. fault while on and idle, then auto-off fires during the fault
+t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=  10.0s | waited 10000 ms            | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=  10.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=  60.0s | do                         | reply=-         | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=  65.0s | waited 55000 ms            | reply=-         | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=  65.0s | cmd TURN_ON                | reply=FAULT     | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=  65.0s | ev FAULT_CLEARED           | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=  65.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+
+== 14. the machine's power switch during a fault
+t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev MACHINE_POWER_SWITCH    | reply=-         | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev MACHINE_POWER_SWITCH    | reply=-         | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev FAULT_CLEARED           | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev MACHINE_POWER_SWITCH    | reply=-         | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+
+== 15. temperature events during a fault update power
+t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | FAULT          phase=FAULT   power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_TOO_HOT            | reply=-         | FAULT          phase=FAULT   power=COOLING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev FAULT_CLEARED           | reply=-         | IDLE           phase=IDLE    power=COOLING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+
+== 16. fault while off, then cleared
+t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd START_BREW             | reply=FAULT     | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=FAULT     | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=FAULT     | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd STOP_BREW              | reply=OK        | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd LEAVE_STEAM            | reply=OK        | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev FAULT_CLEARED           | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd START_BREW             | reply=NOT_READY | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+
+== 17. fault during steam
+t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | STEAM_HEATING  phase=IDLE    power=ON      steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | ev TEMP_READY              | reply=-         | STEAM_READY    phase=IDLE    power=ON      steam=READY   stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=COOLING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd LEAVE_STEAM            | reply=OK        | FAULT          phase=FAULT   power=COOLING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=FAULT     | FAULT          phase=FAULT   power=COOLING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | FAULT          phase=FAULT   power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev FAULT_CLEARED           | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | STEAM_HEATING  phase=IDLE    power=ON      steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+
+== 18. TURN_OFF during a fault, then the fault clears (stays off)
+t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd TURN_OFF               | reply=OK        | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev FAULT_CLEARED           | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   1.0s | waited 1000 ms             | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
 ```
 
 </details>
@@ -376,13 +447,68 @@ Highlights:
   - the device cap (20 s, counted from steam start) ends steam at 20.0 s;
   - LINK_LOST at 8 s doesn't end it.
 - **Machine-started brew (scenario 10):** survives LINK_LOST and 15 s without writes.
+- **Auto-off during a fault (13):** fault at 10 s while idle, and auto-off still turns the machine off at 60.0 s (`phase` stays FAULT).
+  TURN_ON is refused with FAULT until the fault clears.
+- **Power switch during a fault (14):** it turns the machine off; pressed again while still faulted it's ignored; after FAULT_CLEARED it turns on.
+- **Temperature during a fault (15):** `TEMP_READY` and `TEMP_TOO_HOT` move `power` to READY and COOLING while in FAULT.
+- **Fault while off (16):** the state stays OFF with `phase=FAULT`. START_BREW, ENTER_STEAM and TURN_ON get FAULT, while STOP_BREW and LEAVE_STEAM get OK. After clearing, OFF behaves normally.
+- **Fault during steam (17):** steam is left (heater off, `power=COOLING`). LEAVE_STEAM is OK and ENTER_STEAM is FAULT; after clearing, ENTER_STEAM works again.
+- **TURN_OFF during a fault (18):** off with `phase=FAULT`; clearing the fault leaves it off.
+
+**What changed in the first 12 scenarios after the fault restructure:** 4 lines, all intended.
+- **Scenario 8, `ev FAULT_CLEARED`:** `power` is READY, was HEATING. Clearing no longer re-enters ON (which reset `power`), so it keeps reporting the last temperature event.
+- **Scenario 12, first `ev FAULT_DETECTED` and `cmd TURN_OFF`:** the state is `OFF` with `phase=FAULT`, was a separate `FAULT` state.
+- **Scenario 12, second `cmd TURN_OFF`:** the state is `OFF` with `phase=FAULT`, was `FAULT`. Relay, power and reply are unchanged.
+
+### Fault restructure: before and after
+
+Before (FAULT replaced the power state: 13 lines incl. a choice point and a host query):
+
+```
+state FAULT
+state AFTER_FAULT <<choice>>
+ManettaSm --> FAULT : FAULT_DETECTED
+IDLE --> OFF : do [elapsed(auto_off_from) >= auto_off_min * 60000]
+STEAM --> OFF : 3. do [elapsed(auto_off_from) >= auto_off_min * 60000]
+FAULT : enter / phase = Phase.FAULT;
+FAULT : exit / phase = Phase.IDLE;
+FAULT : (TURN_ON, START_BREW, ENTER_STEAM) / reply = Reply.FAULT;
+FAULT : TURN_OFF / reply = Reply.OK; set_power_relay(false); power = Power.OFF;
+FAULT : FAULT_DETECTED
+FAULT --> AFTER_FAULT : FAULT_CLEARED
+AFTER_FAULT --> ON : [power_relay_is_on()]
+AFTER_FAULT --> OFF : else
+```
+
+After (FAULT inside ON; a fault while off is the `phase` flag; one auto-off check):
+
+```
+state ON { ... state FAULT }
+ON --> FAULT : FAULT_DETECTED
+ON --> OFF : do [phase != Phase.BREWING && elapsed(auto_off_from) >= auto_off_min * 60000]
+FAULT : enter / phase = Phase.FAULT;
+FAULT : (TURN_ON, START_BREW, ENTER_STEAM) / reply = Reply.FAULT;
+FAULT : FAULT_DETECTED
+FAULT --> IDLE : FAULT_CLEARED / phase = Phase.IDLE;
+
+OFF : 1. (TURN_ON, START_BREW, ENTER_STEAM) [phase == Phase.FAULT] / reply = Reply.FAULT;
+OFF : 2. (START_BREW, ENTER_STEAM) [phase != Phase.FAULT] / reply = Reply.NOT_READY;
+OFF --> ON : 3. TURN_ON [phase != Phase.FAULT] / reply = Reply.OK;
+OFF --> ON : MACHINE_POWER_SWITCH [phase != Phase.FAULT]
+OFF : FAULT_DETECTED / phase = Phase.FAULT;
+OFF : FAULT_CLEARED / phase = Phase.IDLE;
+```
+
+The diagram file went from 188 to 191 lines. The fault rules are about the same size: OFF gained the fault-flag lines that the separate FAULT state used to cover,
+and a few comments explain the structure. The gains are in behaviour (the three bugs above).
+The choice point, the duplicated auto-off check, the duplicated OFF entry actions and the `power_relay_is_on()` host query are all gone.
 
 ## What felt awkward
 
 Status on this branch: ✅ fixed by portable code, ◐ partly, ◻ still open (see `/NORTH_STAR.md` for the plan).
 
 1. ✅ **Time is polling, not timers.** Now `after(brew_cmd_max_ms)` is a trigger that records the entry time itself.
-   `next_deadline_ms()` lets the host sleep between timers (25 `do` dispatches instead of 2,190 in these scenarios).
+   `next_deadline_ms()` lets the host sleep between timers (29 `do` dispatches instead of 2,850 in these scenarios).
    - Was: StateSmith had no `after(25 s)` trigger. Every cap is a guard on the `do` event, re-evaluated each tick, so a cap's resolution is the tick (100 ms here).
    - Was: each one needs its own "started at" timestamp variable, set in an entry action. (`after()` now does this; re-armable timers such as the steam command cap still use a timestamp and `elapsed()`.)
    - Was: the 30-minute device cap meant 18,000 `do` dispatches, each running every guard of every active state. A polling host still does that; a sleeping host wakes once.
@@ -414,6 +540,29 @@ Status on this branch: ✅ fixed by portable code, ◐ partly, ◻ still open (s
     `#![allow(...)]` lints. These now sit in the generated file, where the enums live.
 
 Nothing in the requested scope was impossible to express. The hard parts were ergonomics rather than missing semantics. Portable code and the time helpers remove 1, 2, 7 and 8.
+
+## Does the lack of orthogonal regions hurt?
+
+**For this cut-down scope: not much, once the hierarchy is right.** One machine plus variables covers it.
+The first fault design shows the risk, though: a parallel concern (fault) was modelled as a state that *replaces* another (power).
+That silently dropped three ON rules (auto-off, temperature, power switch) and nothing in the tool flagged it. The trace tests only caught it once scenarios for it existed.
+
+What works without regions here:
+- **Power and phase overlap only at a few points**, so "FAULT inside ON, plus a `phase` flag while OFF" captures it with no duplicated rules.
+- **Temperature is a variable with three handlers.**
+- **Auto-off is one guarded check.**
+
+What still shows the seams:
+- **`phase` is a hand-maintained flag** that encodes "a fault is active" across OFF and ON. A region would make that a state.
+- **STEAM blocks the temperature events** with a do-nothing behaviour.
+- **The auto-off guard has to know about BREWING** (`phase != Phase.BREWING`).
+
+**When regions would be worth it:** when the parallel parts get many rules *between* them.
+- The obvious next case is a dual-boiler machine, where the steam boiler really does run in parallel with brewing. Steam would have its own heating, ready and fault life cycle, interacting with brew rules (power budget, shared pump).
+- As variables and guards, every cross rule becomes a guard on both sides, and it gets easy to miss one, as the first fault design did.
+- With regions, each part keeps its own states, and the cross rules become explicit `in(STATE)` guards or internal events.
+
+That's roadmap P5 in `/NORTH_STAR.md`. For now, scenario tests per parallel concern are the safety net.
 
 ## Regenerate and run
 

@@ -26,7 +26,7 @@ skinparam defaultFontSize 13
 ' Parallel concerns are variables + guards (StateSmith has no regions):
 '   temperature  -> `power` (HEATING / READY / COOLING), updated by TEMP_* events in ON
 '   auto-off     -> `auto_off_from` timestamp + `do` guard
-'   faults       -> FAULT state
+'   faults       -> FAULT sub state of ON while on; `phase == Phase.FAULT` while off
 
 /'! $CONFIG : toml
 [RenderConfig]
@@ -45,7 +45,6 @@ Functions = """
 void set_pump(bool on);              // brew pump
 void set_power_relay(bool on);       // boiler power relay
 void set_steam_heater(bool on);
-bool power_relay_is_on();
 """
 Events = """
 START_BREW(uint max_ms)              // command cap for this brew
@@ -88,24 +87,32 @@ state ON {
         state STEAM_HEATING
         state STEAM_READY
     }
+    state FAULT
 }
-state FAULT
-state AFTER_FAULT <<choice>>
+
+' A fault doesn't replace the power state, it sits beside it:
+'   - while ON, FAULT is a sub state of ON, so everything ON does (auto-off, temperature, power switch, TURN_OFF) keeps working;
+'   - while OFF, the machine stays in OFF and `phase` reports FAULT.
+' `phase == Phase.FAULT` is the one fault flag. Only FAULT_CLEARED resets it, so a fault survives turning off.
 
 ' ////////////////// ROOT (the machine itself): true in every state unless a child overrides it //////////////////
 
 ManettaSm : PING / reply = Reply.OK;
 ManettaSm : STOP_BREW / reply = Reply.OK;
 ManettaSm : LEAVE_STEAM / reply = Reply.OK;
-ManettaSm --> FAULT : FAULT_DETECTED
 
 ' ////////////////////////////// OFF //////////////////////////////
+' A fault while off is a flag, not a state. Turning on is refused while a fault is active, both from the app (reply FAULT)
+' and from the machine's own power switch (ignored): heating a machine that reports a fault is the unsafe choice.
 
 OFF : enter / set_power_relay(false); power = Power.OFF;
 OFF : TURN_OFF / reply = Reply.OK;
-OFF : (START_BREW, ENTER_STEAM) / reply = Reply.NOT_READY;
-OFF --> ON : TURN_ON / reply = Reply.OK;
-OFF --> ON : MACHINE_POWER_SWITCH
+OFF : 1. (TURN_ON, START_BREW, ENTER_STEAM) [phase == Phase.FAULT] / reply = Reply.FAULT;
+OFF : 2. (START_BREW, ENTER_STEAM) [phase != Phase.FAULT] / reply = Reply.NOT_READY;
+OFF --> ON : 3. TURN_ON [phase != Phase.FAULT] / reply = Reply.OK;
+OFF --> ON : MACHINE_POWER_SWITCH [phase != Phase.FAULT]
+OFF : FAULT_DETECTED / phase = Phase.FAULT;
+OFF : FAULT_CLEARED / phase = Phase.IDLE;
 
 ' ////////////////////////////// ON //////////////////////////////
 ' Default answers while on. Children override them.
@@ -118,6 +125,9 @@ ON : TEMP_READY / power = Power.READY;
 ON : TEMP_TOO_HOT / power = Power.COOLING;
 ON --> OFF : TURN_OFF / reply = Reply.OK;
 ON --> OFF : MACHINE_POWER_SWITCH
+ON --> FAULT : FAULT_DETECTED
+' Auto-off: once, for every ON sub state (idle, steam, fault), never during a brew.
+ON --> OFF : do [phase != Phase.BREWING && elapsed(auto_off_from) >= auto_off_min * 60000]
 
 
 ' ////////////////////////////// IDLE //////////////////////////////
@@ -133,8 +143,6 @@ IDLE : 1. ENTER_STEAM [max_ms == 0] / reply = Reply.INVALID;
 IDLE : 2. ENTER_STEAM [max_ms != 0 && power == Power.HEATING] / reply = Reply.NOT_READY;
 IDLE --> STEAM : 3. ENTER_STEAM [max_ms != 0 && power != Power.HEATING] / reply = Reply.OK; steam_cmd_max_ms = max_ms;
 IDLE --> STEAM : MACHINE_STEAM_BUTTON [power != Power.HEATING] / steam_cmd_max_ms = device_max_steam_ms;
-
-IDLE --> OFF : do [elapsed(auto_off_from) >= auto_off_min * 60000]
 
 ' ////////////////////////////// BREWING //////////////////////////////
 
@@ -166,23 +174,18 @@ STEAM --> IDLE : LEAVE_STEAM / reply = Reply.OK;
 STEAM --> IDLE : MACHINE_STEAM_BUTTON
 STEAM --> IDLE : 1. do [elapsed(steam_cmd_at) >= steam_cmd_max_ms]
 STEAM --> IDLE : 2. after(device_max_steam_ms)
-STEAM --> OFF : 3. do [elapsed(auto_off_from) >= auto_off_min * 60000]
 
 STEAM_HEATING : enter / steam_state = SteamState.HEATING;
 STEAM_HEATING --> STEAM_READY : TEMP_READY
 STEAM_READY : enter / steam_state = SteamState.READY;
 
-' ////////////////////////////// FAULT //////////////////////////////
+' ////////////////////////////// FAULT (while on) //////////////////////////////
 ' Entering FAULT exits BREWING / STEAM, so their exit actions turn the pump and steam heater off.
-' The power relay is left as it was. TURN_OFF still works and decides where we go when the fault clears.
+' Everything else (auto-off, temperature, TURN_OFF, the power switch) is handled by ON.
 
 FAULT : enter / phase = Phase.FAULT;
-FAULT : exit / phase = Phase.IDLE;
 FAULT : (TURN_ON, START_BREW, ENTER_STEAM) / reply = Reply.FAULT;
-FAULT : TURN_OFF / reply = Reply.OK; set_power_relay(false); power = Power.OFF;
 FAULT : FAULT_DETECTED
-FAULT --> AFTER_FAULT : FAULT_CLEARED
-AFTER_FAULT --> ON : [power_relay_is_on()]
-AFTER_FAULT --> OFF : else
+FAULT --> IDLE : FAULT_CLEARED / phase = Phase.IDLE;
 
 @enduml

@@ -19,7 +19,6 @@ class TraceHost implements ManettaSmHost {
     set_pump(on: boolean): void { this.pump_on = on; }
     set_power_relay(on: boolean): void { this.power_relay_on = on; }
     set_steam_heater(on: boolean): void { this.steam_on = on; }
-    power_relay_is_on(): boolean { return this.power_relay_on; }
 }
 
 type Sm = ManettaSm & { host: TraceHost };

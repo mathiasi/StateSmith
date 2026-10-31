@@ -93,7 +93,7 @@ t=   2.0s | waited 2000 ms             | reply=-         | BREWING        phase=
 t=   2.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
 t=   2.0s | cmd START_BREW             | reply=FAULT     | FAULT          phase=FAULT   power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
 t=   2.0s | cmd TURN_ON                | reply=FAULT     | FAULT          phase=FAULT   power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
-t=   2.0s | ev FAULT_CLEARED           | reply=-         | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
+t=   2.0s | ev FAULT_CLEARED           | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
 t=   2.0s | ev TEMP_READY              | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
 t=   2.0s | cmd START_BREW             | reply=OK        | BREWING        phase=BREWING power=READY   steam=OFF     stop=NONE        src=APP     pump=1 relay=1 steam_on=0
 t=   2.0s | cmd STOP_BREW              | reply=OK        | IDLE           phase=IDLE    power=READY   steam=OFF     stop=APP         src=APP     pump=0 relay=1 steam_on=0
@@ -131,10 +131,75 @@ t=   0.0s | ev LINK_LOST               | reply=-         | IDLE           phase=
 
 == 12. a fault while off, TURN_OFF in fault, clearing back to off
 t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
-t=   0.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
-t=   0.0s | cmd TURN_OFF               | reply=OK        | FAULT          phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_OFF               | reply=OK        | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
 t=   0.0s | ev FAULT_CLEARED           | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
 t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
 t=   0.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
-t=   0.0s | cmd TURN_OFF               | reply=OK        | FAULT          phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_OFF               | reply=OK        | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
 t=   0.0s | ev FAULT_CLEARED           | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+
+== 13. fault while on and idle, then auto-off fires during the fault
+t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=  10.0s | waited 10000 ms            | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=  10.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=  60.0s | do                         | reply=-         | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=  65.0s | waited 55000 ms            | reply=-         | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=  65.0s | cmd TURN_ON                | reply=FAULT     | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=  65.0s | ev FAULT_CLEARED           | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=  65.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+
+== 14. the machine's power switch during a fault
+t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev MACHINE_POWER_SWITCH    | reply=-         | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev MACHINE_POWER_SWITCH    | reply=-         | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev FAULT_CLEARED           | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev MACHINE_POWER_SWITCH    | reply=-         | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+
+== 15. temperature events during a fault update power
+t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | FAULT          phase=FAULT   power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_TOO_HOT            | reply=-         | FAULT          phase=FAULT   power=COOLING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev FAULT_CLEARED           | reply=-         | IDLE           phase=IDLE    power=COOLING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+
+== 16. fault while off, then cleared
+t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd START_BREW             | reply=FAULT     | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=FAULT     | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=FAULT     | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd STOP_BREW              | reply=OK        | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd LEAVE_STEAM            | reply=OK        | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev FAULT_CLEARED           | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd START_BREW             | reply=NOT_READY | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+
+== 17. fault during steam
+t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | STEAM_HEATING  phase=IDLE    power=ON      steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | ev TEMP_READY              | reply=-         | STEAM_READY    phase=IDLE    power=ON      steam=READY   stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=COOLING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd LEAVE_STEAM            | reply=OK        | FAULT          phase=FAULT   power=COOLING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=FAULT     | FAULT          phase=FAULT   power=COOLING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | FAULT          phase=FAULT   power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev FAULT_CLEARED           | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | STEAM_HEATING  phase=IDLE    power=ON      steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+
+== 18. TURN_OFF during a fault, then the fault clears (stays off)
+t=   0.0s | start                      | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | IDLE           phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | IDLE           phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | FAULT          phase=FAULT   power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd TURN_OFF               | reply=OK        | OFF            phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev FAULT_CLEARED           | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   1.0s | waited 1000 ms             | reply=-         | OFF            phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0

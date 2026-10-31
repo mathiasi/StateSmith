@@ -26,9 +26,6 @@ impl ManettaSmHost for TraceHost {
     fn set_steam_heater(&mut self, on: bool) {
         self.steam_on = on;
     }
-    fn power_relay_is_on(&mut self) -> bool {
-        self.power_relay_on
-    }
 }
 
 type Sm = ManettaSm<TraceHost>;

@@ -45,9 +45,6 @@ impl ManettaSmHost for BoardHost {
     fn set_steam_heater(&mut self, on: bool) {
         self.set(STEAM_HEATER, on)
     }
-    fn power_relay_is_on(&mut self) -> bool {
-        self.gpio_out & POWER_RELAY != 0
-    }
 }
 
 /// `const fn new(host)`: the machine, host included, can be built at compile time

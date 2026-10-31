@@ -71,7 +71,7 @@ public class ManettaExampleGenTests
 
         rustSleep.StdOutput.Should().Be(rust.StdOutput);
         nodeSleep.StdOutput.Should().Be(rust.StdOutput);
-        rustSleep.StdError.Should().Contain("do dispatches: 25 ");
-        rust.StdError.Should().Contain("do dispatches: 2190 ");
+        rustSleep.StdError.Should().Contain("do dispatches: 29 ");
+        rust.StdError.Should().Contain("do dispatches: 2850 ");
     }
 }

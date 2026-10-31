@@ -147,3 +147,65 @@ cmd TURN_ON
 ev FAULT_DETECTED
 cmd TURN_OFF
 ev FAULT_CLEARED
+
+# ---- faults beside the power state (FAULT is a sub state of ON; a fault while off is `phase == FAULT` in OFF) ----
+
+scenario 13. fault while on and idle, then auto-off fires during the fault
+set auto_off_min 1
+cmd TURN_ON
+ev TEMP_READY
+wait 10000
+ev FAULT_DETECTED
+wait 55000
+cmd TURN_ON
+ev FAULT_CLEARED
+cmd TURN_ON
+
+scenario 14. the machine's power switch during a fault
+cmd TURN_ON
+ev TEMP_READY
+ev FAULT_DETECTED
+ev MACHINE_POWER_SWITCH
+ev MACHINE_POWER_SWITCH
+ev FAULT_CLEARED
+ev MACHINE_POWER_SWITCH
+
+scenario 15. temperature events during a fault update power
+cmd TURN_ON
+ev FAULT_DETECTED
+ev TEMP_READY
+ev TEMP_TOO_HOT
+ev FAULT_CLEARED
+ev TEMP_READY
+
+scenario 16. fault while off, then cleared
+ev FAULT_DETECTED
+cmd START_BREW
+cmd ENTER_STEAM
+cmd TURN_ON
+cmd STOP_BREW
+cmd LEAVE_STEAM
+ev FAULT_CLEARED
+cmd START_BREW
+cmd TURN_ON
+
+scenario 17. fault during steam
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 60000
+cmd ENTER_STEAM
+ev TEMP_READY
+ev FAULT_DETECTED
+cmd LEAVE_STEAM
+cmd ENTER_STEAM
+ev TEMP_READY
+ev FAULT_CLEARED
+cmd ENTER_STEAM
+
+scenario 18. TURN_OFF during a fault, then the fault clears (stays off)
+cmd TURN_ON
+ev TEMP_READY
+ev FAULT_DETECTED
+cmd TURN_OFF
+ev FAULT_CLEARED
+wait 1000

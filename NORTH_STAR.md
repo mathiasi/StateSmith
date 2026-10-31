@@ -38,7 +38,7 @@ ENTER_STEAM(uint max_ms)
 """
 Functions = """                                              ' ✅ P3 host calls -> Rust trait / TS interface
 void set_pump(bool on);
-bool power_relay_is_on();
+void set_power_relay(bool on);
 """
 '/
 
@@ -87,8 +87,11 @@ pub fn next_deadline_ms(&self) -> u32 {
 TypeScript from the same line: `((((this.vars.now_ms - this.vars.BREWING_entered_at) >>> 0)) >= this.vars.brew_cmd_max_ms) && (this.vars.start_source == StartSource.APP)`, plus `public nextDeadlineMs(): number`.
 
 What stays out on purpose:
-- **Orthogonal regions.** Manetta already decided on one hierarchical machine (brew and steam are mutually exclusive on a single heater).
-  The parallel concerns are variables and guards, and with portable code plus time helpers those read cleanly. See P5 for when regions would be worth it.
+- **Orthogonal regions, for now.** The accurate claim: one machine plus variables covers *this cut-down scope*.
+  Brew and steam are mutually exclusive on a single heater; temperature, auto-off and faults are variables, guards and one sub state.
+  It holds up only if every parallel concern sits *beside* the power state rather than replacing it. The first fault design got that wrong, and three rules silently stopped working during a fault (see section 4, "Fault restructure").
+  Regions become worth it when parallel parts get many rules *between* them. A dual-boiler machine is the clear case: its steam boiler really does run in parallel with brewing, with its own life cycle and shared resources.
+  See P5.
 - **The heartbeat stays a host concern.** "Any BLE write is a heartbeat" is a transport fact. The host sets `last_write_at`; the diagram only says what a quiet link means.
 
 ## 2. Principles
@@ -113,7 +116,7 @@ What stays out on purpose:
 | **P2** | **Time**: `after(ms)`, `elapsed(t)` | transform adds `{STATE}_entered_at` plus an entry action; text rewrite at expansion; transpilers map unsigned `+ - *` to wrapping ops | spike done: `after(ms)` trigger (grammar), `elapsed()`, generated `next_deadline_ms()`. Upstream: all transpilers, plus a decision on one-shot vs level-triggered `after()`: about 1 week | **✅ Rust + TS** |
 | P3 | Host calls and event payloads | `Functions` → a Rust trait as a generic parameter (`ManettaSm<H: ManettaHost>`) plus a TS interface; `START_BREW(uint max_ms)` → typed `dispatch_start_brew(max_ms)` | spike done (design in section 5). Upstream: 1–2 weeks to cover the other targets (C: extern functions or a function-pointer struct) and agree the design with the maintainer | **✅ Rust + TS** |
 | P4 | Diagram ergonomics | root behaviours in PlantUML; accept `left to right direction`; `in(STATE)` guard (subtree-id range check); event groups `(COMMANDS)` | about 1 week, mostly grammar plus small transforms | ◐ root behaviours done |
-| P5 | Orthogonal regions | per-region state ids, dispatch to each region, cross-region exit, `in()` across regions (see the earlier analysis) | 4–8 weeks, core algorithm; only if a truly independent concern appears | ◻ (not needed for Manetta) |
+| P5 | Orthogonal regions | per-region state ids, dispatch to each region, cross-region exit, `in()` across regions (see the earlier analysis) | 4–8 weeks, core algorithm; worth it once parallel parts have many rules between them (e.g. a dual-boiler steam boiler beside brewing) | ◻ (not needed for the cut-down single-heater scope) |
 
 Upstream path: P1 and P2 help all eight languages, not just Rust, so they make a good first discussion with the maintainer
 (next to StateSmith/StateSmith#475 for Rust). They extend the existing `$gil(...)` mechanism (wiki "mixing GIL and user code"), rather than adding a new language.
@@ -150,14 +153,14 @@ Upstream path: P1 and P2 help all eight languages, not just Rust, so they make a
 - **Trace:** byte-identical to the expansion-based version from `manetta-example`, and Rust == TypeScript (140 lines, 12 scenarios).
 - **Diagram text:** the three state-entry timers are now real triggers, e.g. `BREWING --> IDLE : 1. after(brew_cmd_max_ms) [start_source == StartSource.APP] / ...`.
 - **Sleeping host:** both runners have a `--sleep` mode that, like a low-power board, sleeps until `next_deadline_ms()` instead of ticking `do` every 100 ms.
-  The traces are identical to polling, and identical across Rust and TypeScript, with **25 `do` dispatches instead of 2,190** over the 12 scenarios.
+  The traces are identical to polling, and identical across Rust and TypeScript, with **25 `do` dispatches instead of 2,190** over the 12 scenarios of the time (29 vs 2,850 over today's 18).
 - **Builds:** clippy-clean; `#![no_std]` riscv32imc build was 2,394 B `.text` at this step (2,430 B after P3). That includes an exported `manetta_next_deadline_ms()` (312 B) to prove the deadline query compiles for the board.
 
 **Tests:**
 - `PortableCodeTests` (6): Rust and TS output (including the `after()` trigger and `next_deadline_ms()`), balanced-paren rewriting, missing time variable,
   unknown trigger call (`every(ms)`), and a typo (`Light.ONN`) failing at generation time.
   The last one is a real gain over raw target code: StateSmith compiles portable code with Roslyn, so mistakes surface once, before any target compiler runs.
-- `ManettaExampleGenTests.RustAndTypeScriptTracesMatch`: Rust == TypeScript, and polling == sleeping for both, with the 25 vs 2,190 dispatch counts asserted.
+- `ManettaExampleGenTests.RustAndTypeScriptTracesMatch`: Rust == TypeScript, and polling == sleeping for both, with the dispatch counts asserted (now 29 vs 2,850).
 - Full suite: 758 pass, and the 92 failures are the same set as on the untouched base commit (environmental, Java and TypeScript Spec2 tooling in this container), nothing new.
   No other language's committed output changed.
 
@@ -185,12 +188,26 @@ Upstream path: P1 and P2 help all eight languages, not just Rust, so they make a
 - **`[RenderConfig.Portable] Events`:** `START_BREW(uint max_ms)` generates a `max_ms` variable and `dispatch_start_brew(max_ms)` (TS `dispatchStartBrew`).
   Arguments with the same name share a variable and must have the same type. A declared event that no behaviour uses is an error.
 - **Manetta:**
-  - pump, power relay and steam heater are host calls (`set_pump(true);`), and the fault-clear choice asks the host (`[power_relay_is_on()]`);
+  - pump, power relay and steam heater are host calls (`set_pump(true);`), and the fault-clear choice asked the host (`[power_relay_is_on()]`; the fault restructure later removed both);
   - `cmd_max_ms` became the `max_ms` payload of `START_BREW` / `ENTER_STEAM`;
   - the runners implement a recording `TraceHost` and call the typed dispatchers;
   - the board crate implements a GPIO-style `BoardHost`.
-- **Results:** traces are still byte-identical to v1 for Rust and TypeScript, polling and sleeping. The no_std board build is 2,430 B `.text`, clippy-clean, static dispatch.
+- **Results:** traces are still byte-identical to v1 for Rust and TypeScript, polling and sleeping. The no_std board build was 2,430 B `.text` (2,372 B after the fault restructure), clippy-clean, static dispatch.
 - **Tests:** `PortableHostAndPayloadTests` (4). The full suite has 762 passing, and the same 92 environmental failures as the base commit.
+
+**Fault restructure (after P3):** the first design made FAULT a sibling of OFF and ON, so a fault replaced the power state.
+- **What broke:** entering FAULT left ON, so auto-off stopped (SPEC 5.9 doesn't exempt faults), `TEMP_*` stopped updating `power`, and the machine's power switch was ignored.
+  It also needed a choice point and a `power_relay_is_on()` host query to recover on/off when the fault cleared.
+- **Now:**
+  - while on, FAULT is a sub state of ON (beside IDLE, BREWING and STEAM), so ON's rules keep working;
+  - while off, OFF stays the state, and `phase == Phase.FAULT` is the flag;
+  - only FAULT_CLEARED resets the flag, so a fault survives turning off;
+  - auto-off is one check on ON, guarded `phase != Phase.BREWING`;
+  - TURN_ON and the machine's power switch are refused while off and faulted.
+- **Scenarios:** six new ones (13–18) cover auto-off, the power switch, temperature, fault while off, fault during steam, and TURN_OFF during a fault.
+  The 18-scenario trace is identical across Rust and TypeScript and across polling and sleeping.
+  The first 12 scenarios changed in exactly 4 lines, all intended (listed in the example README).
+- **Diagram size:** 188 → 191 lines.
 
 **Next concrete steps:**
 1. Hardening for upstream: C99 and C# in portable mode (C99 needs initialisers in its ctor, and host calls as extern functions or a function-pointer struct), plus a Spec2-style portable spec run in several languages.
@@ -218,7 +235,7 @@ B is the natural follow-up if a firmware design really needs to keep the periphe
 It could be a per-diagram setting later (`HostPassing = "owned" | "per_call"`), with the same diagram text.
 
 Details that follow from A:
-- **Every trait method takes `&mut self`,** even queries like `power_relay_is_on()`. On embedded, reading a pin or sensor usually needs `&mut` (embedded-hal), and one rule is simpler than inferring.
+- **Every trait method takes `&mut self`,** even queries like `door_closed()`. On embedded, reading a pin or sensor usually needs `&mut` (embedded-hal), and one rule is simpler than inferring.
 - **No reentrancy.** Host methods only get `&mut` to the host, never to the machine, so a callback can't dispatch an event into a machine that is mid-transition.
   A host that wants to raise an event queues it and dispatches after the current dispatch returns.
 - **The host stays reachable** as `sm.host`, a public field, so the firmware can service peripherals between dispatches.
