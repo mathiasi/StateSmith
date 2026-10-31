@@ -6,5 +6,5 @@
     "outDir": "dist",
     "rootDir": "."
   },
-  "files": ["runner.ts", "ManettaSm.ts", "manetta_types.ts"]
+  "files": ["runner.ts", "ManettaSm.ts"]
 }

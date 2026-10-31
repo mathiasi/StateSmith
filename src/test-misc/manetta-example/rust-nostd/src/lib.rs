@@ -1,7 +1,5 @@
 #![no_std]
 
-#[path = "../../rust/src/manetta_types.rs"]
-mod manetta_types;
 #[path = "../../rust/src/manetta_sm.rs"]
 mod manetta_sm;
 

@@ -12,10 +12,12 @@ public class ExpansionConfigReader
 {
     private readonly ExpanderFileReflection expanderFileReflection;
     private readonly string expansionVarsPath;
+    private readonly RenderConfigPortableVars? portable;
 
     // required for Dependency Injection
-    public ExpansionConfigReader(IExpander expander, IExpansionVarsPathProvider expansionVarsPathProvider, UserExpansionScriptBases userExpansionScriptBases) : this(expander, expansionVarsPathProvider.ExpansionVarsPath, userExpansionScriptBases)
+    public ExpansionConfigReader(IExpander expander, IExpansionVarsPathProvider expansionVarsPathProvider, UserExpansionScriptBases userExpansionScriptBases, RenderConfigPortableVars portable) : this(expander, expansionVarsPathProvider.ExpansionVarsPath, userExpansionScriptBases)
     {
+        this.portable = portable;
     }
 
     internal ExpansionConfigReader(IExpander expander, string expansionVarsPath, UserExpansionScriptBases userExpansionScriptBases)
@@ -43,7 +45,8 @@ public class ExpansionConfigReader
     {
         if (expansionObject != null)
         {
-            expansionObject.VarsPath = expansionVarsPath;
+            // portable code mode: expansions produce GIL code, so they must use the GIL vars path. Checked late because diagram TOML may enable it.
+            expansionObject.VarsPath = portable?.IsEnabled == true ? RenderConfigPortableVars.GilVarsPath : expansionVarsPath;
             expanderFileReflection.AddAllExpansions(expansionObject);
         }
     }

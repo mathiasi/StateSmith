@@ -187,6 +187,44 @@ public class TypeScriptGilVisitor : CSharpSyntaxWalker
         base.VisitEnumDeclaration(node);
     }
 
+    /// <summary>
+    /// GIL unsigned arithmetic wraps (C# `unchecked` is the default). Portable code relies on that for time math like
+    /// `now_ms - started_at`, so map unsigned `+ - *` to explicit wrapping operations.
+    /// </summary>
+    private static bool IsUnsigned(ITypeSymbol? type) => type?.SpecialType is SpecialType.System_Byte or SpecialType.System_UInt16 or SpecialType.System_UInt32 or SpecialType.System_UInt64;
+
+    public override void VisitBinaryExpression(BinaryExpressionSyntax node)
+    {
+        bool isWrappingOp = node.Kind() is SyntaxKind.AddExpression or SyntaxKind.SubtractExpression or SyntaxKind.MultiplyExpression;
+
+        if (!isWrappingOp || !IsUnsigned(model.GetTypeInfo(node).Type))
+        {
+            base.VisitBinaryExpression(node);
+            return;
+        }
+
+        VisitLeadingTrivia(node.GetFirstToken());
+        string left = Capture(() => Visit(node.Left)).Trim();
+        string right = Capture(() => Visit(node.Right)).Trim();
+
+        if (node.IsKind(SyntaxKind.MultiplyExpression))
+            sb.Append($"(Math.imul({left}, {right}) >>> 0)");
+        else
+            sb.Append($"(({left} {node.OperatorToken.Text} {right}) >>> 0)");
+
+        VisitTrailingTrivia(node.GetLastToken());
+    }
+
+    private string Capture(System.Action action)
+    {
+        var original = sb;
+        sb = new StringBuilder();
+        action();
+        var captured = sb.ToString();
+        sb = original;
+        return captured;
+    }
+
     public override void VisitNullableType(NullableTypeSyntax node)
     {
         Visit(node.ElementType); // this avoids outputting the `?` for a nullable type
@@ -307,7 +345,14 @@ public class TypeScriptGilVisitor : CSharpSyntaxWalker
         switch ((SyntaxKind)token.RawKind)
         {
             case SyntaxKind.BoolKeyword: tokenText = "boolean"; break;
-            case SyntaxKind.IntKeyword: tokenText = "number"; break;
+            case SyntaxKind.IntKeyword:
+            case SyntaxKind.UIntKeyword:
+            case SyntaxKind.ByteKeyword:
+            case SyntaxKind.SByteKeyword:
+            case SyntaxKind.ShortKeyword:
+            case SyntaxKind.UShortKeyword:
+            case SyntaxKind.FloatKeyword:
+            case SyntaxKind.DoubleKeyword: tokenText = "number"; break;
             case SyntaxKind.PublicKeyword:
                 if (publicAsExport)
                 {

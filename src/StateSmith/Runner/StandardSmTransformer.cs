@@ -34,6 +34,7 @@ public class StandardSmTransformer : SmTransformer
         /// See https://github.com/StateSmith/StateSmith/issues/108
         /// </summary>
         Standard_SupportAlternateTriggers,
+        Standard_SupportPortableTime,
         Standard_Validation1,
         Standard_DefaultUnspecifiedEventsAsDoEvent,
         /// <summary>
@@ -45,7 +46,7 @@ public class StandardSmTransformer : SmTransformer
     };
 
     // this ctor used for Dependency Injection
-    public StandardSmTransformer(TomlConfigVerticesProcessor tomlConfigVerticesProcessor, RenderConfigVerticesProcessor renderConfigVerticesProcessor, HistoryProcessor historyProcessor, StateNameConflictResolver nameConflictResolver, TriggerMapProcessor triggerMapProcessor)
+    public StandardSmTransformer(TomlConfigVerticesProcessor tomlConfigVerticesProcessor, RenderConfigVerticesProcessor renderConfigVerticesProcessor, HistoryProcessor historyProcessor, StateNameConflictResolver nameConflictResolver, TriggerMapProcessor triggerMapProcessor, PortableTimeProcessor? portableTimeProcessor = null)
     {
         AddStep(TransformationId.Standard_RemoveNotesVertices, (sm) => NotesProcessor.Process(sm));
         AddStep(TransformationId.Standard_TomlConfig, (sm) => tomlConfigVerticesProcessor.Process(sm));
@@ -58,6 +59,7 @@ public class StandardSmTransformer : SmTransformer
         AddStep(TransformationId.Standard_SupportElseGuard, (sm) => ElseGuardProcessor.Process(sm)); // must happen before ordering step
         AddStep(TransformationId.Standard_SupportOrderAndElse, (sm) => OrderAndElseProcessor.Process(sm)); // should happen after most steps as it orders behaviors
         AddStep(TransformationId.Standard_SupportAlternateTriggers, (sm) => SupportAlternateTriggersProcessor.Process(sm));
+        AddStep(TransformationId.Standard_SupportPortableTime, (sm) => portableTimeProcessor?.Process(sm)); // EXPERIMENTAL portable code mode. After ordering so the entry-time action runs first.
         AddStep(TransformationId.Standard_Validation1, (sm) => Validate(sm));
         AddStep(TransformationId.Standard_DefaultUnspecifiedEventsAsDoEvent, (sm) => DefaultToDoEventVisitor.Process(sm));
         AddStep(TransformationId.Standard_TriggerMapping, (sm) => triggerMapProcessor.Process(sm));

@@ -1,8 +1,8 @@
 // Scenario runner (host side). Plays ../scenarios.txt and prints one trace line per step.
 // rust/src/main.rs does exactly the same; the two outputs must be identical.
 
-import { ManettaSm, EventId } from "./ManettaSm";
-import { Reply, Phase, Power, SteamState, StopReason, StartSource } from "./manetta_types";
+// The enums (Reply, Power, ...) are generated from the diagram's [RenderConfig.Portable] Types.
+import { ManettaSm, EventId, Reply, Phase, Power, SteamState, StopReason, StartSource } from "./ManettaSm";
 
 // Minimal node declarations so the example needs no npm install (no @types/node).
 declare const process: { argv: string[] };

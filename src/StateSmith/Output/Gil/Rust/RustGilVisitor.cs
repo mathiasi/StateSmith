@@ -397,9 +397,18 @@ public class RustGilVisitor : CSharpSyntaxWalker
         if (SymbolEqualityComparer.Default.Equals(symbol, defaultMember))
         {
             VisitLeadingTrivia(node.GetFirstToken());
-            string indent = StringUtils.FindLastIndent(sb);
-            sb.AppendLine("#[default]");
-            sb.Append(indent);
+            bool memberStartsLine = node.GetFirstToken().GetPreviousToken().TrailingTrivia.Any(t => t.IsKind(SyntaxKind.EndOfLineTrivia))
+                || node.GetFirstToken().LeadingTrivia.Any(t => t.IsKind(SyntaxKind.EndOfLineTrivia));
+            if (memberStartsLine)
+            {
+                string indent = StringUtils.FindLastIndent(sb);
+                sb.AppendLine("#[default]");
+                sb.Append(indent);
+            }
+            else
+            {
+                sb.Append("#[default] "); // one line enum like `enum Reply { NONE, OK }`
+            }
             skipLeadingTrivia = true;
         }
 
@@ -858,6 +867,37 @@ public class RustGilVisitor : CSharpSyntaxWalker
         }
 
         base.VisitIdentifierName(node);
+    }
+
+    /// <summary>
+    /// GIL unsigned arithmetic wraps (C# `unchecked` is the default). Portable code relies on that for time math like
+    /// `now_ms - started_at`, so map unsigned `+ - *` to explicit wrapping operations.
+    /// </summary>
+    private static bool IsUnsigned(ITypeSymbol? type) => type?.SpecialType is SpecialType.System_Byte or SpecialType.System_UInt16 or SpecialType.System_UInt32 or SpecialType.System_UInt64;
+
+    public override void VisitBinaryExpression(BinaryExpressionSyntax node)
+    {
+        string? method = node.Kind() switch
+        {
+            SyntaxKind.AddExpression => "wrapping_add",
+            SyntaxKind.SubtractExpression => "wrapping_sub",
+            SyntaxKind.MultiplyExpression => "wrapping_mul",
+            _ => null
+        };
+
+        if (method == null || !IsUnsigned(model.GetTypeInfo(node).Type))
+        {
+            base.VisitBinaryExpression(node);
+            return;
+        }
+
+        VisitLeadingTrivia(node.GetFirstToken());
+        string left = Capture(() => Visit(node.Left)).Trim();
+        string right = Capture(() => Visit(node.Right)).Trim();
+        bool leftIsSimple = node.Left is IdentifierNameSyntax or MemberAccessExpressionSyntax or LiteralExpressionSyntax or ParenthesizedExpressionSyntax or InvocationExpressionSyntax;
+        sb.Append(leftIsSimple ? left : $"({left})");
+        sb.Append($".{method}({right})");
+        VisitTrailingTrivia(node.GetLastToken());
     }
 
     /// <summary>

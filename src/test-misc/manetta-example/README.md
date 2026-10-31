@@ -4,16 +4,20 @@ A cut-down Manetta device state machine, drawn once in PlantUML and generated tw
 - **Rust** (`rust/src/manetta_sm.rs`), using the experimental Rust target from the `rust-spike` branch (see `/RUST_SPIKE.md`);
 - **TypeScript** (`ts/ManettaSm.ts`), using StateSmith's existing TypeScript target.
 
+> **Branch `north-star`:** this version uses the experimental **portable code** mode (see `/NORTH_STAR.md`).
+> The diagram declares its own types and variables, and all diagram code is translated per language, so there is **no per-language glue at all**.
+> The expansion-based first version is on branch `manetta-example`. Its trace is byte-identical to this one.
+
 Both runners play the same `scenarios.txt` and print the same trace. **The two traces are byte-identical** (140 lines, 12 scenarios).
 The Rust module also builds as `#![no_std]` for `riscv32imc-unknown-none-elf`.
 
 | | Result |
 |---|---|
-| Same diagram text for both languages | yes. Only the glue differs: variable declarations rendered from one table, plus about 10 helper expansions |
+| Same diagram text for both languages | yes, and nothing else: types, variables and code are all in `ManettaSm.plantuml`. The generator only picks the target |
 | Rust trace == TypeScript trace | **identical** (`diff trace-rust.txt trace-ts.txt` is empty; checked by `ManettaExampleGenTests.RustAndTypeScriptTracesMatch`) |
 | Rust warnings | 0 rustc and 0 clippy warnings for the runner crate and the no_std crate |
 | TypeScript | `tsc` 6.0 with `strict`, target ES2020: no errors |
-| no_std, `riscv32imc-unknown-none-elf`, `opt-level = "s"` | builds. Whole crate object: **2,080 B `.text`**, 0 data, 0 bss. The only external symbol is `memset` (from `compiler_builtins`) |
+| no_std, `riscv32imc-unknown-none-elf`, `opt-level = "s"` | builds. Whole crate object: **2,084 B `.text`**, 0 data, 0 bss. The only external symbol is `memset` (from `compiler_builtins`) |
 
 ## The diagram
 
@@ -51,24 +55,40 @@ Changes from the suggested hierarchy, and why:
 
 ### How one diagram text serves both languages
 
-Diagram code uses a subset that means the same thing in Rust and TypeScript:
+The diagram's `$CONFIG` block (a kept PlantUML comment, invisible in the picture) declares the types and variables once:
+
+```toml
+[RenderConfig.Portable]
+Types = """
+enum Reply { NONE, OK, BUSY, NOT_READY, FAULT, INVALID }
+enum Power { OFF, HEATING, READY, COOLING, ON }
+...
+"""
+Variables = """
+uint now_ms = 0;                     // monotonic ms, set before every dispatch
+Reply reply = Reply.NONE;            // answer to the last command
+bool pump_on = false;
+...
+"""
+```
+
+All action and guard code is portable code, which StateSmith translates for each language:
 
 | In the diagram | Rust | TypeScript |
 |---|---|---|
-| `pump_on = true;` `brew_started_at = now_ms;` `cmd_max_ms != 0` | `self.vars.pump_on = true;` ... | `this.vars.pump_on = true;` ... |
-| `set_reply(OK);` | `self.vars.reply = Reply::OK` | `this.vars.reply = Reply.OK` |
-| `power_is(READY)`, `started_by(APP)` | `(self.vars.power == Power::READY)` | `(this.vars.power == Power.READY)` |
-| `elapsed(brew_started_at)` | `self.vars.now_ms.wrapping_sub(self.vars.brew_started_at)` | `((this.vars.now_ms - this.vars.brew_started_at) >>> 0)` |
-| `minutes(auto_off_min)` | `(self.vars.auto_off_min * 60000)` | `(this.vars.auto_off_min * 60000)` |
+| `reply = Reply.OK;` | `self.vars.reply = Reply::OK;` | `this.vars.reply = Reply.OK;` |
+| `power != Power.HEATING` | `self.vars.power != Power::HEATING` | `this.vars.power != Power.HEATING` |
+| `after(brew_cmd_max_ms)` (time since BREWING was entered) | `self.vars.now_ms.wrapping_sub(self.vars.BREWING_entered_at) >= self.vars.brew_cmd_max_ms` | `((this.vars.now_ms - this.vars.BREWING_entered_at) >>> 0) >= this.vars.brew_cmd_max_ms` |
+| `elapsed(last_write_at)` | `self.vars.now_ms.wrapping_sub(self.vars.last_write_at)` | `((this.vars.now_ms - this.vars.last_write_at) >>> 0)` |
+| `auto_off_min * 60000` | `self.vars.auto_off_min.wrapping_mul(60000)` | `(Math.imul(this.vars.auto_off_min, 60000) >>> 0)` |
 
 How the pieces fit:
-- **Variables.** Every variable is an auto-expanded var, so a bare name gets the right `self.vars.` / `this.vars.` prefix.
-- **Enums and time.** Enum access (`::` vs `.`) and wrapping time arithmetic go through expansions. The expansions are defined once in an
-  abstract C# class with two small subclasses, in [`ManettaExampleGenTests.cs`](../../StateSmithTest/Output/Rust/ManettaExampleGenTests.cs).
-- **Declarations.** Variable declarations are one C# table rendered twice: `now_ms: u32 = 0,` for Rust, `public now_ms: number = 0;` for TypeScript.
-- **Output enums.** These are hand-written twice, in `rust/src/manetta_types.rs` and `ts/manetta_types.ts`, with the same SCREAMING_CASE names.
-
-Everything in the scope fits this subset; nothing needed per-language diagram text.
+- **Enums** are generated into both outputs from the `Types` declaration: in Rust with `#[repr(u8)]`, derives and `*_COUNT`; in TypeScript as `export enum`.
+  The runners import them from the generated module.
+- **`after()`** makes StateSmith add a `BREWING_entered_at` variable and an entry action that stamps it.
+- **Unsigned arithmetic** wraps like the device's u32 counter in both languages.
+- **The generator test** ([`ManettaExampleGenTests.cs`](../../StateSmithTest/Output/Rust/ManettaExampleGenTests.cs)) has no render config, no expansions
+  and no variable table. It only chooses the target language and output folder.
 
 Generated code for the same behaviour, IDLE handling START_BREW (step comments trimmed):
 
@@ -76,20 +96,20 @@ Generated code for the same behaviour, IDLE handling START_BREW (step comments t
 fn idle_start_brew(&mut self) {
     let mut consume_event: bool = false;
 
-    // uml: 1. START_BREW [cmd_max_ms == 0] / { set_reply(INVALID); }
+    // uml: 1. START_BREW [cmd_max_ms == 0] / { reply = Reply.INVALID; }
     if self.vars.cmd_max_ms == 0 {
         consume_event = true;
         self.vars.reply = Reply::INVALID;
     }
 
-    // uml: 2. START_BREW [cmd_max_ms != 0 && !power_is(READY)] / { set_reply(NOT_READY); }
-    if self.vars.cmd_max_ms != 0 && !(self.vars.power == Power::READY) {
+    // uml: 2. START_BREW [cmd_max_ms != 0 && power != Power.READY] / { reply = Reply.NOT_READY; }
+    if self.vars.cmd_max_ms != 0 && self.vars.power != Power::READY {
         consume_event = true;
         self.vars.reply = Reply::NOT_READY;
     }
 
-    // uml: 3. START_BREW [cmd_max_ms != 0 && power_is(READY)] / { set_reply(OK); set_start_source(APP); brew_cmd_max_ms = cmd_max_ms; } TransitionTo(BREWING)
-    if self.vars.cmd_max_ms != 0 && (self.vars.power == Power::READY) {
+    // uml: 3. START_BREW [cmd_max_ms != 0 && power == Power.READY] / { reply = Reply.OK; start_source = StartSource.APP; brew_cmd_max_ms = cmd_max_ms; } TransitionTo(BREWING)
+    if self.vars.cmd_max_ms != 0 && self.vars.power == Power::READY {
         self.idle_exit();
         self.vars.reply = Reply::OK; self.vars.start_source = StartSource::APP; self.vars.brew_cmd_max_ms = self.vars.cmd_max_ms;
         self.brewing_enter();
@@ -107,20 +127,20 @@ fn idle_start_brew(&mut self) {
 private IDLE_start_brew(): void
 {
     let consume_event: boolean = false;
-    // uml: 1. START_BREW [cmd_max_ms == 0] / { set_reply(INVALID); }
+    // uml: 1. START_BREW [cmd_max_ms == 0] / { reply = Reply.INVALID; }
     if (this.vars.cmd_max_ms == 0)
     {
         consume_event = true;
         this.vars.reply = Reply.INVALID;
     }
-    // uml: 2. START_BREW [cmd_max_ms != 0 && !power_is(READY)] / { set_reply(NOT_READY); }
-    if (this.vars.cmd_max_ms != 0 && !(this.vars.power == Power.READY))
+    // uml: 2. START_BREW [cmd_max_ms != 0 && power != Power.READY] / { reply = Reply.NOT_READY; }
+    if (this.vars.cmd_max_ms != 0 && this.vars.power != Power.READY)
     {
         consume_event = true;
         this.vars.reply = Reply.NOT_READY;
     }
-    // uml: 3. START_BREW [cmd_max_ms != 0 && power_is(READY)] / { ... } TransitionTo(BREWING)
-    if (this.vars.cmd_max_ms != 0 && (this.vars.power == Power.READY))
+    // uml: 3. START_BREW [cmd_max_ms != 0 && power == Power.READY] / { ... } TransitionTo(BREWING)
+    if (this.vars.cmd_max_ms != 0 && this.vars.power == Power.READY)
     {
         this.IDLE_exit();
         this.vars.reply = Reply.OK; this.vars.start_source = StartSource.APP; this.vars.brew_cmd_max_ms = this.vars.cmd_max_ms;
@@ -134,7 +154,7 @@ private IDLE_start_brew(): void
 }
 ```
 
-Generated sizes: `manetta_sm.rs` is 1,499 lines and `ManettaSm.ts` 1,608, mostly comments that echo the diagram.
+Generated sizes: `manetta_sm.rs` is 1,541 lines and `ManettaSm.ts` 1,633, mostly comments that echo the diagram.
 
 ## What the diagram covers
 
@@ -152,7 +172,7 @@ Choices made where the scope left room:
 - **Two brew caps due on the same tick:** the command cap wins and is reported, by ordering (`1. do` before `2. do`). Steam works the same way.
 - **The machine's brew switch:** `MACHINE_BREW_SWITCH_ON` in IDLE starts a brew whatever the temperature (it's a physical switch),
   with `start_source = MACHINE`, which ignores link loss and heartbeat. `MACHINE_BREW_SWITCH_OFF` stops any brew with `MACHINE`.
-- **The steam button:** toggles steam (entering it needs `!power_is(HEATING)`). A button-started steam's command cap is the device cap.
+- **The steam button:** toggles steam (entering it needs `power != Power.HEATING`). A button-started steam's command cap is the device cap.
 - **The power switch:** toggles power. During a brew it stops the brew with `MACHINE`.
 - **TURN_ON while already on:** OK, and it restarts the auto-off clock ("the later of the last TURN_ON and the end of the last brew").
 - **Auto-off:** fires from IDLE and from STEAM (steam doesn't hold it off), never from BREWING.
@@ -342,39 +362,41 @@ Highlights:
 
 ## What felt awkward
 
-1. **Time is polling, not timers.**
-   - StateSmith has no `after(25 s)` trigger. Every cap is a guard on the `do` event, re-evaluated each tick, so a cap's resolution is the tick (100 ms here).
-   - Each one needs its own "started at" timestamp variable, set in an entry action.
+Status on this branch: ✅ fixed by portable code, ◐ partly, ◻ still open (see `/NORTH_STAR.md` for the plan).
+
+1. ◐ **Time is polling, not timers.** Now `after(brew_cmd_max_ms)` records the entry time automatically; it's still a `do` guard, not a trigger.
+   - Was: StateSmith has no `after(25 s)` trigger. Every cap is a guard on the `do` event, re-evaluated each tick, so a cap's resolution is the tick (100 ms here).
+   - Was: each one needs its own "started at" timestamp variable, set in an entry action. (`after()` now does this; re-armable timers such as the steam command cap still use a timestamp and `elapsed()`.)
    - The 30-minute device cap means 18,000 `do` dispatches. That's cheap here, but it also means `do` runs every guard of every active state on every tick.
    - Which reason is reported when two caps expire on the same tick depends on the `1.` / `2.` ordering numbers. That's a subtle thing to encode in edge labels.
-2. **Wrapping time needs an expansion.** `now_ms - t` would panic on wraparound in debug Rust and is a float in TypeScript.
-   `elapsed(t)` hides that (`wrapping_sub` vs `>>> 0`), but it's one more helper readers must know.
-3. **"Any write counts as a heartbeat" can't be said once in the diagram.**
+2. ✅ **Wrapping time needs an expansion.** Now built in: `elapsed()` / `after()`, and unsigned math wraps in every language.
+   Was: `now_ms - t` would panic on wraparound in debug Rust and is a float in TypeScript, so a hand-written `elapsed()` expansion was needed per language.
+3. ◻ **"Any write counts as a heartbeat" can't be said once in the diagram.** Kept as a host concern on purpose.
    - A child's handler for an event consumes it, so an ancestor can't watch "every command".
    - StateSmith has no "on any event" or orthogonal-region hook.
    - The host sets `last_write_at` on every BLE write instead. That's arguably the right place, but it's behaviour outside the diagram.
-4. **No `else` for event handlers.**
+4. ◻ **No `else` for event handlers.**
    - When guarded behaviours in one state handle the same event, *every* passing guard runs; StateSmith keeps evaluating after an action-only behaviour.
    - So IDLE's three START_BREW behaviours need mutually exclusive guards, which repeats `cmd_max_ms != 0 &&`.
    - A choice point would give `else`, but its outgoing transitions would exit and re-enter IDLE just to answer a command.
-5. **Parallel concerns become "do nothing" overrides.** Steam must hide the brew temperature events from ON, which takes a bare
+5. ◻ **Parallel concerns become "do nothing" overrides.** Steam must hide the brew temperature events from ON, which takes a bare
    `STEAM : (TEMP_HEATING, TEMP_READY, TEMP_TOO_HOT)` behaviour. It reads oddly unless you know that a behaviour with no action still consumes the event.
-6. **No root behaviours in PlantUML**, hence the outer `MANETTA` state.
+6. ◻ **No root behaviours in PlantUML**, hence the outer `MANETTA` state.
    The grammar also rejects `left to right direction`, which this picture needs to stay readable, so it sits in a
    `' <StateSmith:ignore>` block. (`skinparam` lines are accepted.)
-7. **Enums can't be written portably.** `Reply::OK` vs `Reply.OK` forces `set_reply(OK)` / `power_is(READY)` expansions.
-   - Expansion arguments are untyped text: `set_reply(OKK)` only fails later, in each language's compiler.
-   - The enum definitions are written twice by hand. StateSmith could emit user enums from one declaration, but doesn't today.
-8. **Variable declarations aren't language neutral.** The diagram can't declare `now_ms: u32` once.
-   - The generator keeps one C# table and renders it per language.
-   - The glue (expansions, var table) is C#. For a Rust and TypeScript team, that's a third language in the build.
-9. **Commands answer through a `reply` variable.** That works, but every state path must remember to set it:
+7. ✅ **Enums can't be written portably.** Now `reply = Reply.OK;`, with the enum declared once in the diagram and generated for both languages.
+   - Was: `Reply::OK` vs `Reply.OK` forced `set_reply(OK)` / `power_is(READY)` expansions.
+   - Was: expansion arguments were untyped text. Now a typo like `Reply.OKK` fails at generation time, because StateSmith compiles the portable code with Roslyn.
+   - Was: the enum definitions were written twice by hand.
+8. ✅ **Variable declarations aren't language neutral.** Now declared once in the diagram; the C# glue is gone.
+   - Was: the generator kept one C# table and rendered it per language, so the glue (expansions, var table) was a third language in a Rust and TypeScript build.
+9. ◻ **Commands answer through a `reply` variable.** Typed event payloads are planned (P3). It works, but every state path must remember to set `reply`:
    MANETTA, ON and OFF hold defaults so nothing slips through. Event arguments (`cmd_max_ms`) are written to variables before the dispatch,
    because events carry no payload.
-10. **Naming compromise in Rust.** SCREAMING_CASE enum variants keep the diagram text identical for both languages, at the cost of
-    `#![allow(non_camel_case_types, clippy::upper_case_acronyms)]` in `manetta_types.rs`.
+10. ◐ **Naming compromise in Rust.** SCREAMING_CASE enum variants keep the diagram text identical for both languages, at the cost of
+    `#![allow(...)]` lints. These now sit in the generated file, where the enums live.
 
-Nothing in the requested scope was impossible to express. The hard parts were ergonomics (1, 3, 4, 7) rather than missing semantics.
+Nothing in the requested scope was impossible to express. The hard parts were ergonomics rather than missing semantics. Portable code removes 2, 7 and 8 and half of 1.
 
 ## Regenerate and run
 
@@ -411,13 +433,11 @@ Files:
 - `scenarios.txt`: the scenarios both runners play. `trace-rust.txt` and `trace-ts.txt` are their outputs.
 - `rust/`:
   - `src/manetta_sm.rs`: generated;
-  - `src/manetta_types.rs`: hand-written enums;
   - `src/main.rs`: the scenario runner.
-- `rust-nostd/`: `#![no_std]` staticlib for riscv32imc. It uses the same two Rust files via `#[path]`.
+- `rust-nostd/`: `#![no_std]` staticlib for riscv32imc. It uses the generated `manetta_sm.rs` via `#[path]`.
 - `ts/`:
   - `ManettaSm.ts`: generated;
-  - `manetta_types.ts`: hand-written enums;
   - `runner.ts`: the scenario runner;
   - `tsconfig.json`: ES2020, strict, no npm dependencies.
-- [`../../StateSmithTest/Output/Rust/ManettaExampleGenTests.cs`](../../StateSmithTest/Output/Rust/ManettaExampleGenTests.cs): the generator glue
-  (variable table, expansions, both render configs) and the trace comparison test.
+- [`../../StateSmithTest/Output/Rust/ManettaExampleGenTests.cs`](../../StateSmithTest/Output/Rust/ManettaExampleGenTests.cs): the generator
+  (target selection only) and the trace comparison test.

@@ -48,6 +48,11 @@ public class RenderConfigAllVars
     /// </summary>
     public readonly RenderConfigRustVars Rust;
 
+    /// <summary>
+    /// NOTE! Field name used with reflection for toml parsing. EXPERIMENTAL portable code mode.
+    /// </summary>
+    public readonly RenderConfigPortableVars Portable;
+
     public RenderConfigAllVars()
     {
         Base = new RenderConfigBaseVars();
@@ -58,6 +63,7 @@ public class RenderConfigAllVars
         Java = new RenderConfigJavaVars();
         Python = new RenderConfigPythonVars();
         Rust = new RenderConfigRustVars();
+        Portable = new RenderConfigPortableVars();
         Cpp = new RenderConfigCppVars();
     }
 }

@@ -80,6 +80,7 @@ public class DiServiceProvider : IDisposable
             services.AddTransient<ExpansionConfigReader>();
 
             services.AddTransient<HistoryProcessor>();
+            services.AddTransient<PortableTimeProcessor>(); // EXPERIMENTAL portable code mode
 
             services.AddSingleton<ICodeGenRunner, GilAlgoCodeGen>();
             services.AddSingleton<IGilAlgo, AlgoBalanced1>();
@@ -176,6 +177,7 @@ public class DiServiceProvider : IDisposable
         services.AddSingleton(renderConfigAllVars.Java);
         services.AddSingleton(renderConfigAllVars.Python);
         services.AddSingleton(renderConfigAllVars.Rust);
+        services.AddSingleton(renderConfigAllVars.Portable);
         services.AddSingleton(renderConfigAllVars.TypeScript);
         services.AddSingleton<IExpansionVarsPathProvider, CSharpExpansionVarsPathProvider>();
         services.AddSingleton<RunnerSettings>(new RunnerSettings(""));

@@ -38,7 +38,7 @@ public class LightSm {
     public StateId state_id;
     
     // State machine variables. Can be used for inputs, outputs, user variables...
-    public struct Vars {
+    public class Vars {
         public ON_GROUP_HistoryId ON_GROUP_history;
         public string ____GilData_FieldEchoStringVoid0;//"count: u8 = 0,"
         public string ____GilData_FieldEchoStringVoid1;//"light: Light = Light::new(),"

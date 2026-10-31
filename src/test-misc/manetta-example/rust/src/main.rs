@@ -2,9 +2,9 @@
 //! `ts/runner.ts` does exactly the same; the two outputs must be identical.
 
 mod manetta_sm;
-mod manetta_types;
 
-use manetta_sm::{EventId, ManettaSm};
+// The enums (Reply, Power, ...) are generated from the diagram's [RenderConfig.Portable] Types.
+use manetta_sm::{EventId, ManettaSm, Reply};
 
 const TICK_MS: u32 = 100;
 
@@ -92,7 +92,7 @@ fn main() {
                 set_var(&mut sm, name, value.parse().expect("number"));
             }
             "cmd" => {
-                sm.vars.reply = manetta_types::Reply::NONE;
+                sm.vars.reply = Reply::NONE;
                 sm.vars.last_write_at = sm.vars.now_ms;
                 sm.dispatch_event(parse_event(rest));
                 let reply = format!("{:?}", sm.vars.reply);

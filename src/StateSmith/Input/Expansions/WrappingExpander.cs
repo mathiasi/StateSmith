@@ -23,9 +23,11 @@ public class WrappingExpander
     private readonly IExpander expander;
     private static readonly Regex codeTypeSplittingRegex = new($@"<(?<type>{XML_FINAL_CODE_TAG_NAME}|{XML_GIL_CODE_TAG_NAME})>(?<value>[\s\S]*?){XML_END_CODE_TAG}"); // MUST be lazy match to prevent skipping over multiple matches
     private readonly UserExpansionScriptBases userExpansionScriptBases;
+    private readonly RenderConfigPortableVars? portable;
 
-    public WrappingExpander(IExpander expander, UserExpansionScriptBases userExpansionScriptBases)
+    public WrappingExpander(IExpander expander, UserExpansionScriptBases userExpansionScriptBases, RenderConfigPortableVars? portable = null)
     {
+        this.portable = portable;
         this.expander = expander;
         this.userExpansionScriptBases = userExpansionScriptBases;
     }
@@ -66,9 +68,21 @@ public class WrappingExpander
 
     protected string ExpandWrapCode(string code, bool isGuard, Behavior behavior)
     {
+        if (portable?.IsEnabled == true)
+            code = PortableTimeProcessor.Rewrite(code, behavior, portable); // `after()`, `elapsed()`
+
         string expanded = ExpandCode(code, behavior);
 
-        expanded = $"{XML_FINAL_CODE_TAG}{expanded}{XML_END_CODE_TAG}";
+        if (portable?.IsEnabled == true)
+        {
+            // Portable code mode: ALL diagram code is GIL, so explicit `$gil(...)` sections just merge in.
+            expanded = expanded.Replace(XML_END_CODE_TAG + XML_GIL_CODE_TAG, "").Replace(XML_END_CODE_TAG + XML_FINAL_CODE_TAG, "");
+            expanded = $"{XML_GIL_CODE_TAG}{expanded}{XML_END_CODE_TAG}";
+        }
+        else
+        {
+            expanded = $"{XML_FINAL_CODE_TAG}{expanded}{XML_END_CODE_TAG}";
+        }
 
         if (isGuard)
             return WrapExpandedForGuard(expanded);

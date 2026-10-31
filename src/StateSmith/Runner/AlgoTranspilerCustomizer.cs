@@ -157,6 +157,7 @@ public class AlgoTranspilerCustomizer
                     sp.AddSingletonT<IAutoVarsParser, RustAutoVarsParser>();
                     algoBalanced1Settings.skipClassIndentation = false;
                     algoBalanced1Settings.outputEnumMemberCount = false; // Rust enums can't hold a count member. Visitor emits consts instead.
+                    algoBalanced1Settings.varsStructAsClass = true; // lets GIL `Vars` fields have initializers (portable code mode). Output is a Rust struct either way.
 
                     if (algorithmId != AlgorithmId.Balanced2)
                     {

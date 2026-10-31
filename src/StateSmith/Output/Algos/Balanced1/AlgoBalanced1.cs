@@ -25,6 +25,7 @@ public class AlgoBalanced1 : IGilAlgo
     protected readonly IAlgoStateIdToString algoStateIdToString;
     protected readonly StandardFileHeaderPrinter standardFileHeaderPrinter;
     private readonly GilCreationHelper gilCreationHelper;
+    protected readonly RenderConfigPortableVars? portable;
 
     protected StateMachine? _sm;
     protected const string AlgoWikiLink = "https://github.com/StateSmith/StateSmith/wiki/Algorithms";
@@ -33,8 +34,9 @@ public class AlgoBalanced1 : IGilAlgo
 
     protected static string ConstMarker => ""; // todo_low - put in an attribute like [ro] that will end up as `const` for languages that support that
 
-    public AlgoBalanced1(NameMangler mangler, PseudoStateHandlerBuilder pseudoStateHandlerBuilder, EnumBuilder enumBuilder, RenderConfigBaseVars renderConfig, EventHandlerBuilder eventHandlerBuilder, CodeStyleSettings styler, AlgoBalanced1Settings settings, IAlgoEventIdToString algoEventIdToString, IAlgoStateIdToString algoStateIdToString, StandardFileHeaderPrinter standardFileHeaderPrinter)
+    public AlgoBalanced1(NameMangler mangler, PseudoStateHandlerBuilder pseudoStateHandlerBuilder, EnumBuilder enumBuilder, RenderConfigBaseVars renderConfig, EventHandlerBuilder eventHandlerBuilder, CodeStyleSettings styler, AlgoBalanced1Settings settings, IAlgoEventIdToString algoEventIdToString, IAlgoStateIdToString algoStateIdToString, StandardFileHeaderPrinter standardFileHeaderPrinter, RenderConfigPortableVars? portable = null)
     {
+        this.portable = portable;
         this.mangler = mangler;
         this.file = new OutputFile(styler, new StringBuilder());
         this.pseudoStateHandlerBuilder = pseudoStateHandlerBuilder;
@@ -122,6 +124,8 @@ public class AlgoBalanced1 : IGilAlgo
                 file.AppendIndentedLine();
             }
 
+            OutputPortableTypes();
+
             OutputEventHandlerDelegate();
         });
 
@@ -194,6 +198,14 @@ public class AlgoBalanced1 : IGilAlgo
                         file.AppendIndentedLine("public " + line);
                     }
 
+                    if (portable?.IsEnabled == true)
+                    {
+                        foreach (var line in portable.VariableLines())
+                        {
+                            file.AppendIndentedLine(RenderConfigPortableVars.IsCommentOrBlank(line) ? line.Trim() : "public " + line.Trim());
+                        }
+                    }
+
                     foreach (var line in StringUtils.SplitIntoLinesOrEmpty(renderConfig.VariableDeclarations.Trim()))
                     {
                         file.AppendIndentedLine(gilCreationHelper.WrapRawCodeAsField(line));
@@ -223,8 +235,32 @@ public class AlgoBalanced1 : IGilAlgo
         file.AppendIndentedLine($"private {mangler.SmHandlerFuncType}? {mangler.SmCurrentStateExitHandlerVarName};");
     }
 
+    /// <summary>
+    /// Portable code mode: user types (enums) declared in GIL syntax are nested in the state machine class like EventId/StateId,
+    /// so every transpiler emits them the same way it emits its own enums.
+    /// </summary>
+    private void OutputPortableTypes()
+    {
+        if (portable == null || portable.Types.Trim().Length == 0)
+            return;
+
+        file.AppendIndentedLine("// User types (portable code)");
+        foreach (var line in StringUtils.SplitIntoLinesOrEmpty(portable.Types.Trim()))
+        {
+            var trimmed = line.Trim();
+            bool isTypeStart = System.Text.RegularExpressions.Regex.IsMatch(trimmed, @"^(enum|struct|class)\b");
+            file.AppendIndentedLine(isTypeStart ? "public " + trimmed : trimmed);
+        }
+        file.AppendIndentedLine();
+    }
+
     internal bool IsVarsStructNeeded()
     {
+        if (portable?.IsEnabled == true)
+        {
+            return true;
+        }
+
         if (Sm.variables.Length > 0)
         {
             return true;

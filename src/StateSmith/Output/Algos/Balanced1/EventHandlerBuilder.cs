@@ -28,11 +28,11 @@ public class EventHandlerBuilder
 
     protected OutputFile File => _file.ThrowIfNull("You forgot to set file before using.");
 
-    public EventHandlerBuilder(IExpander expander, PseudoStateHandlerBuilder pseudoStateHandlerBuilder, NameMangler mangler, UserExpansionScriptBases userExpansionScriptBases, AlgoBalanced1Settings settings)
+    public EventHandlerBuilder(IExpander expander, PseudoStateHandlerBuilder pseudoStateHandlerBuilder, NameMangler mangler, UserExpansionScriptBases userExpansionScriptBases, AlgoBalanced1Settings settings, RenderConfigPortableVars? portable = null)
     {
         this.pseudoStateHandlerBuilder = pseudoStateHandlerBuilder;
         this.mangler = mangler;
-        this.wrappingExpander = new(expander, userExpansionScriptBases);
+        this.wrappingExpander = new(expander, userExpansionScriptBases, portable);
         this.userExpansionScriptBases = userExpansionScriptBases;
         this.settings = settings;
     }

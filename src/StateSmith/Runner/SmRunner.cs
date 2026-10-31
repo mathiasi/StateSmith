@@ -194,6 +194,7 @@ public class SmRunner : SmRunner.IExperimentalAccess
             services.AddSingleton(renderConfigAllVars.Java);
             services.AddSingleton(renderConfigAllVars.Python);
             services.AddSingleton(renderConfigAllVars.Rust);
+            services.AddSingleton(renderConfigAllVars.Portable);
             services.AddSingleton(new ExpansionConfigReaderObjectProvider(iRenderConfig));
             services.AddSingleton(settings); // todo_low - split settings up more
             services.AddSingleton<ExpansionsPrep>();
