@@ -1,6 +1,7 @@
 using StateSmith.SmGraph;
 using StateSmith.SmGraph.Visitors;
 using System;
+using System.Linq;
 using System.Text;
 
 namespace StateSmith.Output.Sim;
@@ -242,10 +243,20 @@ class MermaidGenerator : IVertexVisitor
         // just ignore config option and any children
     }
 
-    // orthogonal states are not yet implemented, but will be one day
+    /// <summary>
+    /// A region of an orthogonal parent (EXPERIMENTAL, north-star branch). Mermaid draws concurrent regions inside a
+    /// composite state separated by `--`, so the region itself has no box: its children go straight into the parent's.
+    /// </summary>
     public void Visit(OrthoState v)
     {
-        throw new NotImplementedException();
+        if (v.Parent!.Children.OfType<OrthoState>().First() != v)
+        {
+            AppendIndentedLine("--");
+        }
+
+        indentLevel--; // children are visited at the parent's level
+        VisitChildren(v);
+        indentLevel++;
     }
 
     public void Visit(NotesVertex v)

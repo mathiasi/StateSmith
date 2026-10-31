@@ -562,7 +562,9 @@ What still shows the seams:
 - As variables and guards, every cross rule becomes a guard on both sides, and it gets easy to miss one, as the first fault design did.
 - With regions, each part keeps its own states, and the cross rules become explicit `in(STATE)` guards or internal events.
 
-That's roadmap P5 in `/NORTH_STAR.md`. For now, scenario tests per parallel concern are the safety net.
+That's roadmap P5 in `/NORTH_STAR.md`, now implemented (experimental) on this branch.
+The dual-boiler version is in [`../manetta-dual-boiler`](../manetta-dual-boiler/README.md): steam boiler and brew are two regions of ON, with four cross rules written as `in_state()`.
+This single-heater example stays without regions: here, scenario tests per parallel concern are the safety net.
 
 ## Regenerate and run
 

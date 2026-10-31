@@ -3179,8 +3179,25 @@ evaluateGuard = null;
         }
 
         // Function to update event button states (availability and visibility)
+        // With orthogonal regions, one state per region is active at once: use the deepest active state of each.
+        // Ancestors are left out: their handlers are already in their descendants' mappings, minus the ones a descendant overrides.
+        function activeStateDiagramNames(currentStateDiagramName) {
+            const names = new Set([currentStateDiagramName]);
+            document.querySelectorAll('g.active').forEach(e => {
+                const name = e.getAttribute('data-id') || e.getAttribute('id');
+                if (name) names.add(name);
+            });
+            const list = [...names];
+            const id = (name) => ManettaSm.StateId[name.toUpperCase()];
+            const subtreeEnd = (name) => ManettaSm[name.toUpperCase() + '_SubtreeEndId'];
+            if (list.some(name => id(name) === undefined || subtreeEnd(name) === undefined)) {
+                return [currentStateDiagramName]; // no subtree meta data (disabled in settings): the state just entered
+            }
+            return list.filter(n => !list.some(m => id(m) > id(n) && id(m) <= subtreeEnd(n)));
+        }
+
         function updateEventButtonStates(currentStateDiagramName) {
-            const availableEvents = stateEventsMapping[currentStateDiagramName] || [];
+            const availableEvents = activeStateDiagramNames(currentStateDiagramName).flatMap(name => stateEventsMapping[name] || []);
 
             diagramEventNamesArray.forEach(eventName => {
                 const button = document.getElementById('button_' + eventName);
@@ -3226,7 +3243,7 @@ evaluateGuard = null;
 
         // https://github.com/StateSmith/StateSmith/issues/522
         function updateEdgeAvailability(currentStateDiagramName) {
-            const availableEdges = stateEdgeMapping[currentStateDiagramName] || [];
+            const availableEdges = activeStateDiagramNames(currentStateDiagramName).flatMap(name => stateEdgeMapping[name] || []);
 
             document.querySelectorAll('.transition.available').forEach(element => {
               element.classList.remove('available');

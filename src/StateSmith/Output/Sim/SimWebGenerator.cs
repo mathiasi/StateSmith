@@ -413,7 +413,8 @@ public class SimWebGenerator
     {
         // we purposely don't want to trace the entry/exit of the state machine itself.
         // That's why we use `State` instead of `NamedVertex`.
-        if (vertex is State state)
+        // regions (OrthoState) have no box in the mermaid diagram and can't have behaviors
+        if (vertex is State state && vertex is not OrthoState)
         {
             var mermaidName = state.Name;
             state.AddEnterAction($"this.tracer?.enterState('{mermaidName}');", index: 0);

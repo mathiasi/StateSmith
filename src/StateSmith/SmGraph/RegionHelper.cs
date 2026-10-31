@@ -46,7 +46,8 @@ public static class RegionHelper
 
     public const string InStateFuncName = "in_state";
 
-    private static readonly Regex inStateRegex = new($@"(?<![\w.$]){InStateFuncName}\s*\(\s*(?<name>[_a-zA-Z]\w*)\s*\)");
+    // String literals are matched first and kept as they are (the simulator logs guard code in strings).
+    private static readonly Regex inStateRegex = new($@"(?<str>""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*')|(?<![\w.$]){InStateFuncName}\s*\(\s*(?<name>[_a-zA-Z]\w*)\s*\)");
 
     /// <summary>
     /// `in_state(X)`: true while state X is active (X itself or any state inside it). Works across regions, which is how
@@ -65,6 +66,9 @@ public static class RegionHelper
 
         return inStateRegex.Replace(code, m =>
         {
+            if (m.Groups["str"].Success)
+                return m.Value;
+
             string name = m.Groups["name"].Value;
             var target = root.DescendantsOfType<NamedVertex>().FirstOrDefault(v => v.Name == name)
                 ?? throw new System.ArgumentException($"`{InStateFuncName}({name})`: no state named `{name}`.");
@@ -75,8 +79,13 @@ public static class RegionHelper
 
             string first = $"{mangler.SmStateEnumType}.{mangler.SmStateEnumValue(target)}";
             string gil = subtree.subtreeEndVertex == target
-                ? $"({stateVar} == {first})"
-                : $"({stateVar} >= {first} && {stateVar} <= {mangler.SmStateEnumType}.{mangler.SmStateEnumValue(subtree.subtreeEndVertex)})";
+                ? $"{stateVar} == {first}"
+                : $"{stateVar} >= {first} && {stateVar} <= {mangler.SmStateEnumType}.{mangler.SmStateEnumValue(subtree.subtreeEndVertex)}";
+
+            // already the only thing inside parentheses (like `f(in_state(X))`)? Don't add more (clippy `double_parens`).
+            bool alreadyEnclosed = code[..m.Index].TrimEnd().EndsWith('(') && code[(m.Index + m.Length)..].TrimStart().StartsWith(')');
+            if (!alreadyEnclosed)
+                gil = $"({gil})";
             return $"$gil({gil})";
         });
     }

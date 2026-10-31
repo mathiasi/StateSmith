@@ -1,0 +1,154 @@
+
+== 1. steam and brew at the same time (the reason for regions)
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=HEATING steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | ev STEAM_TEMP_READY        | reply=-         | ON[STEAM_READY|IDLE]       phase=IDLE    power=HEATING steam=READY   stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | ev TEMP_READY              | reply=-         | ON[STEAM_READY|IDLE]       phase=IDLE    power=READY   steam=READY   stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | cmd START_BREW             | reply=OK        | ON[STEAM_READY|BREWING]    phase=BREWING power=READY   steam=READY   stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   3.0s | waited 3000 ms             | reply=-         | ON[STEAM_READY|BREWING]    phase=BREWING power=READY   steam=READY   stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   3.0s | cmd PING                   | reply=OK        | ON[STEAM_READY|BREWING]    phase=BREWING power=READY   steam=READY   stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   6.0s | do                         | reply=-         | ON[STEAM_READY|IDLE]       phase=IDLE    power=READY   steam=READY   stop=COMMAND_CAP src=APP     pump=0 relay=1 steam_on=1
+t=   7.0s | waited 4000 ms             | reply=-         | ON[STEAM_READY|IDLE]       phase=IDLE    power=READY   steam=READY   stop=COMMAND_CAP src=APP     pump=0 relay=1 steam_on=1
+t=   7.0s | cmd LEAVE_STEAM            | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=READY   steam=OFF     stop=COMMAND_CAP src=APP     pump=0 relay=1 steam_on=0
+
+== 2. brew priority: the steam heater pauses while the pump runs, and resumes after
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd START_BREW             | reply=OK        | ON[STEAM_OFF|BREWING]      phase=BREWING power=READY   steam=OFF     stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   2.0s | waited 2000 ms             | reply=-         | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   2.0s | cmd STOP_BREW              | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=APP         src=APP     pump=0 relay=1 steam_on=1
+t=   2.0s | cmd LEAVE_STEAM            | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=READY   steam=OFF     stop=APP         src=APP     pump=0 relay=1 steam_on=0
+
+== 3. ENTER_STEAM is OK while the brew boiler still heats (its own boiler)
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=HEATING steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | cmd START_BREW             | reply=NOT_READY | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=HEATING steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | ev STEAM_TEMP_READY        | reply=-         | ON[STEAM_READY|IDLE]       phase=IDLE    power=HEATING steam=READY   stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | ev STEAM_TEMP_HEATING      | reply=-         | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=HEATING steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | ev TEMP_READY              | reply=-         | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | cmd START_BREW             | reply=OK        | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   0.0s | cmd START_BREW             | reply=BUSY      | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   0.0s | cmd STOP_BREW              | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=APP         src=APP     pump=0 relay=1 steam_on=1
+
+== 4. the same event in both regions: FAULT_DETECTED stops the brew AND the steam boiler
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | cmd START_BREW             | reply=OK        | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | ON[STEAM_OFF|FAULT]        phase=FAULT   power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=FAULT     | ON[STEAM_OFF|FAULT]        phase=FAULT   power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
+t=   0.0s | ev MACHINE_STEAM_BUTTON    | reply=-         | ON[STEAM_OFF|FAULT]        phase=FAULT   power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
+t=   0.0s | cmd START_BREW             | reply=FAULT     | ON[STEAM_OFF|FAULT]        phase=FAULT   power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=FAULT     | ON[STEAM_OFF|FAULT]        phase=FAULT   power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
+t=   0.0s | cmd LEAVE_STEAM            | reply=OK        | ON[STEAM_OFF|FAULT]        phase=FAULT   power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
+t=   0.0s | cmd STOP_BREW              | reply=OK        | ON[STEAM_OFF|FAULT]        phase=FAULT   power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
+t=   0.0s | ev FAULT_CLEARED           | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=READY   steam=OFF     stop=FAULT       src=APP     pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=FAULT       src=APP     pump=0 relay=1 steam_on=1
+t=   0.0s | cmd START_BREW             | reply=OK        | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+
+== 5. a fault with the steam boiler off, then TURN_OFF keeps the fault as a flag
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | ON[STEAM_OFF|FAULT]        phase=FAULT   power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd TURN_OFF               | reply=OK        | OFF                        phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=FAULT     | OFF                        phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev MACHINE_POWER_SWITCH    | reply=-         | OFF                        phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev FAULT_CLEARED           | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+
+== 6. fault while off
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev FAULT_DETECTED          | reply=-         | OFF                        phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=FAULT     | OFF                        phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=FAULT     | OFF                        phase=FAULT   power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | ev FAULT_CLEARED           | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+
+== 7. TURN_OFF during a brew is BUSY, then it turns both regions off
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | cmd START_BREW             | reply=OK        | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   0.0s | cmd TURN_OFF               | reply=BUSY      | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   0.0s | cmd STOP_BREW              | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=APP         src=APP     pump=0 relay=1 steam_on=1
+t=   0.0s | cmd TURN_OFF               | reply=OK        | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=APP         src=APP     pump=0 relay=0 steam_on=0
+
+== 8. machine power switch during a brew with steam on
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | ev MACHINE_BREW_SWITCH_ON  | reply=-         | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=MACHINE pump=1 relay=1 steam_on=0
+t=   0.0s | ev MACHINE_POWER_SWITCH    | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=MACHINE     src=MACHINE pump=0 relay=0 steam_on=0
+
+== 9. steam caps: the command cap, a repeat ENTER_STEAM restarts it, the device cap
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=HEATING steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   3.0s | do                         | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   3.5s | waited 3500 ms             | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   3.5s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=HEATING steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   7.5s | waited 4000 ms             | reply=-         | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=HEATING steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   7.5s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=HEATING steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=  11.5s | do                         | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=  12.5s | waited 5000 ms             | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=  12.5s | cmd ENTER_STEAM            | reply=INVALID   | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+
+== 10. the steam button on the machine, ENTER_STEAM INVALID
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev MACHINE_STEAM_BUTTON    | reply=-         | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=HEATING steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | ev STEAM_TEMP_READY        | reply=-         | ON[STEAM_READY|IDLE]       phase=IDLE    power=HEATING steam=READY   stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | cmd ENTER_STEAM            | reply=INVALID   | ON[STEAM_READY|IDLE]       phase=IDLE    power=HEATING steam=READY   stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | ev MACHINE_STEAM_BUTTON    | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=INVALID   | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+
+== 11. link loss stops an app brew but not the steam boiler
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | cmd START_BREW             | reply=OK        | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   0.0s | ev LINK_LOST               | reply=-         | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=LINK_LOST   src=APP     pump=0 relay=1 steam_on=1
+t=   0.0s | ev LINK_LOST               | reply=-         | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=LINK_LOST   src=APP     pump=0 relay=1 steam_on=1
+
+== 12. heartbeat stops an app brew; a machine brew ignores it; steam keeps going
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | cmd START_BREW             | reply=OK        | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   5.0s | do                         | reply=-         | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=HEARTBEAT   src=APP     pump=0 relay=1 steam_on=1
+t=   6.0s | waited 6000 ms             | reply=-         | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=HEARTBEAT   src=APP     pump=0 relay=1 steam_on=1
+t=   6.0s | ev MACHINE_BREW_SWITCH_ON  | reply=-         | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=MACHINE pump=1 relay=1 steam_on=0
+t=  12.0s | waited 6000 ms             | reply=-         | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=MACHINE pump=1 relay=1 steam_on=0
+t=  12.0s | ev MACHINE_BREW_SWITCH_OFF | reply=-         | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=MACHINE     src=MACHINE pump=0 relay=1 steam_on=1
+
+== 13. auto-off: steam doesn't hold it off, a brew does
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=HEATING steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=  30.0s | waited 30000 ms            | reply=-         | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=HEATING steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=  30.0s | ev TEMP_READY              | reply=-         | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=  30.0s | ev MACHINE_BREW_SWITCH_ON  | reply=-         | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=MACHINE pump=1 relay=1 steam_on=0
+t=  70.0s | waited 40000 ms            | reply=-         | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=MACHINE pump=1 relay=1 steam_on=0
+t=  70.0s | ev MACHINE_BREW_SWITCH_OFF | reply=-         | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=MACHINE     src=MACHINE pump=0 relay=1 steam_on=1
+t= 120.0s | do                         | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=READY   steam=OFF     stop=MACHINE     src=MACHINE pump=0 relay=1 steam_on=0
+t= 130.0s | do                         | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=MACHINE     src=MACHINE pump=0 relay=0 steam_on=0
+t= 131.0s | waited 61000 ms            | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=MACHINE     src=MACHINE pump=0 relay=0 steam_on=0
+
+== 14. the brew region's command cap while the steam region runs its own timers
+t=   0.0s | start                      | reply=-         | OFF                        phase=IDLE    power=OFF     steam=OFF     stop=NONE        src=NONE    pump=0 relay=0 steam_on=0
+t=   0.0s | cmd TURN_ON                | reply=OK        | ON[STEAM_OFF|IDLE]         phase=IDLE    power=HEATING steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | ev TEMP_READY              | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=READY   steam=OFF     stop=NONE        src=NONE    pump=0 relay=1 steam_on=0
+t=   0.0s | cmd ENTER_STEAM            | reply=OK        | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=NONE        src=NONE    pump=0 relay=1 steam_on=1
+t=   0.0s | cmd START_BREW             | reply=OK        | ON[STEAM_HEATING|BREWING]  phase=BREWING power=READY   steam=HEATING stop=NONE        src=APP     pump=1 relay=1 steam_on=0
+t=   2.0s | do                         | reply=-         | ON[STEAM_HEATING|IDLE]     phase=IDLE    power=READY   steam=HEATING stop=COMMAND_CAP src=APP     pump=0 relay=1 steam_on=1
+t=   4.0s | do                         | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=READY   steam=OFF     stop=COMMAND_CAP src=APP     pump=0 relay=1 steam_on=0
+t=   5.0s | waited 5000 ms             | reply=-         | ON[STEAM_OFF|IDLE]         phase=IDLE    power=READY   steam=OFF     stop=COMMAND_CAP src=APP     pump=0 relay=1 steam_on=0

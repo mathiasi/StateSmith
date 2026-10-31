@@ -1,0 +1,163 @@
+# Dual boiler scenarios, shared by the Rust runner (rust/src/main.rs) and the TypeScript runner (ts/runner.ts).
+# Same commands as ../manetta-example/scenarios.txt:
+#
+#   scenario <title>    new machine, now_ms = 0, start()
+#   set <var> <n>       write a variable (command arguments, device config)
+#   cmd <EVENT>         a BLE command write: reply = NONE, last_write_at = now_ms, dispatch, print
+#   ev <EVENT>          a machine / sensor event: dispatch, print
+#   wait <ms>           advance time in 100 ms ticks, dispatching `do` each tick; print every change
+#
+# The state column is `OFF` or `ON[<steam boiler region>|<brew region>]`.
+# Brew boiler sensor: TEMP_*. Steam boiler sensor: STEAM_TEMP_*.
+# Device config defaults: device_max_brew_ms 1800000, device_max_steam_ms 600000,
+# heartbeat_timeout_ms 10000, auto_off_min 30.
+
+scenario 1. steam and brew at the same time (the reason for regions)
+cmd TURN_ON
+set cmd_max_ms 120000
+cmd ENTER_STEAM
+ev STEAM_TEMP_READY
+ev TEMP_READY
+set cmd_max_ms 6000
+cmd START_BREW
+wait 3000
+cmd PING
+wait 4000
+cmd LEAVE_STEAM
+
+scenario 2. brew priority: the steam heater pauses while the pump runs, and resumes after
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 60000
+cmd START_BREW
+cmd ENTER_STEAM
+wait 2000
+cmd STOP_BREW
+cmd LEAVE_STEAM
+
+scenario 3. ENTER_STEAM is OK while the brew boiler still heats (its own boiler)
+cmd TURN_ON
+set cmd_max_ms 60000
+cmd ENTER_STEAM
+cmd START_BREW
+ev STEAM_TEMP_READY
+ev STEAM_TEMP_HEATING
+ev TEMP_READY
+cmd START_BREW
+cmd START_BREW
+cmd STOP_BREW
+
+scenario 4. the same event in both regions: FAULT_DETECTED stops the brew AND the steam boiler
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 60000
+cmd ENTER_STEAM
+cmd START_BREW
+ev FAULT_DETECTED
+cmd ENTER_STEAM
+ev MACHINE_STEAM_BUTTON
+cmd START_BREW
+cmd TURN_ON
+cmd LEAVE_STEAM
+cmd STOP_BREW
+ev FAULT_CLEARED
+cmd ENTER_STEAM
+cmd START_BREW
+
+scenario 5. a fault with the steam boiler off, then TURN_OFF keeps the fault as a flag
+cmd TURN_ON
+ev FAULT_DETECTED
+cmd TURN_OFF
+cmd TURN_ON
+ev MACHINE_POWER_SWITCH
+ev FAULT_CLEARED
+cmd TURN_ON
+
+scenario 6. fault while off
+ev FAULT_DETECTED
+cmd TURN_ON
+cmd ENTER_STEAM
+ev FAULT_CLEARED
+cmd TURN_ON
+
+scenario 7. TURN_OFF during a brew is BUSY, then it turns both regions off
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 60000
+cmd ENTER_STEAM
+cmd START_BREW
+cmd TURN_OFF
+cmd STOP_BREW
+cmd TURN_OFF
+
+scenario 8. machine power switch during a brew with steam on
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 60000
+cmd ENTER_STEAM
+ev MACHINE_BREW_SWITCH_ON
+ev MACHINE_POWER_SWITCH
+
+scenario 9. steam caps: the command cap, a repeat ENTER_STEAM restarts it, the device cap
+set device_max_steam_ms 8000
+cmd TURN_ON
+set cmd_max_ms 3000
+cmd ENTER_STEAM
+wait 3500
+set cmd_max_ms 5000
+cmd ENTER_STEAM
+wait 4000
+cmd ENTER_STEAM
+wait 5000
+set cmd_max_ms 0
+cmd ENTER_STEAM
+
+scenario 10. the steam button on the machine, ENTER_STEAM INVALID
+cmd TURN_ON
+ev MACHINE_STEAM_BUTTON
+ev STEAM_TEMP_READY
+cmd ENTER_STEAM
+ev MACHINE_STEAM_BUTTON
+cmd ENTER_STEAM
+
+scenario 11. link loss stops an app brew but not the steam boiler
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 60000
+cmd ENTER_STEAM
+cmd START_BREW
+ev LINK_LOST
+ev LINK_LOST
+
+scenario 12. heartbeat stops an app brew; a machine brew ignores it; steam keeps going
+set heartbeat_timeout_ms 5000
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 60000
+cmd ENTER_STEAM
+cmd START_BREW
+wait 6000
+ev MACHINE_BREW_SWITCH_ON
+wait 6000
+ev MACHINE_BREW_SWITCH_OFF
+
+scenario 13. auto-off: steam doesn't hold it off, a brew does
+set auto_off_min 1
+cmd TURN_ON
+set cmd_max_ms 120000
+cmd ENTER_STEAM
+wait 30000
+ev TEMP_READY
+ev MACHINE_BREW_SWITCH_ON
+wait 40000
+ev MACHINE_BREW_SWITCH_OFF
+wait 61000
+
+scenario 14. the brew region's command cap while the steam region runs its own timers
+cmd TURN_ON
+ev TEMP_READY
+set cmd_max_ms 4000
+cmd ENTER_STEAM
+set cmd_max_ms 2000
+cmd START_BREW
+wait 5000

@@ -4,15 +4,17 @@
 StateSmith generates idiomatic, allocation-free Rust for the board and TypeScript for the app from it, with **no per-language glue**.
 Nobody hand-writes enums twice or keeps a C# expansion file next to a Rust and TypeScript codebase. Nothing new has to be learned beyond the diagram.
 
-This document has five parts:
+This document has six parts:
 1. what "best" looks like;
 2. the principles behind it;
 3. a phased roadmap with effort;
 4. what is already working on branch `north-star`;
-5. the design of the host and event data (P3).
+5. the design of the host and event data (P3);
+6. orthogonal regions (P5) and the dual-boiler machine.
 
 Implemented there so far: portable code (P1), time with `after()` and `next_deadline_ms()` (P2), host calls and typed event data (P3),
-and root behaviours in PlantUML (part of P4). The Manetta example regenerates from the diagram alone, with zero glue.
+root behaviours in PlantUML and an `in_state(STATE)` guard (part of P4), and orthogonal regions (P5, experimental).
+A dual-boiler Manetta (`src/test-misc/manetta-dual-boiler/`) runs its steam boiler and brew side as two regions. The Manetta example regenerates from the diagram alone, with zero glue.
 Its trace is still byte-identical to the expansion-based version (Rust == TypeScript == before, polling == sleeping).
 
 ## 1. What the diagram should say
@@ -87,11 +89,11 @@ pub fn next_deadline_ms(&self) -> u32 {
 TypeScript from the same line: `((((this.vars.now_ms - this.vars.BREWING_entered_at) >>> 0)) >= this.vars.brew_cmd_max_ms) && (this.vars.start_source == StartSource.APP)`, plus `public nextDeadlineMs(): number`.
 
 What stays out on purpose:
-- **Orthogonal regions, for now.** The accurate claim: one machine plus variables covers *this cut-down scope*.
+- **Orthogonal regions in the single-heater example.** The accurate claim: one machine plus variables covers *this cut-down scope*.
   Brew and steam are mutually exclusive on a single heater; temperature, auto-off and faults are variables, guards and one sub state.
   It holds up only if every parallel concern sits *beside* the power state rather than replacing it. The first fault design got that wrong, and three rules silently stopped working during a fault (see section 4, "Fault restructure").
   Regions become worth it when parallel parts get many rules *between* them. A dual-boiler machine is the clear case: its steam boiler really does run in parallel with brewing, with its own life cycle and shared resources.
-  See P5.
+  That machine now exists as a second example with regions (P5, section 6).
 - **The heartbeat stays a host concern.** "Any BLE write is a heartbeat" is a transport fact. The host sets `last_write_at`; the diagram only says what a quiet link means.
 
 ## 2. Principles
@@ -115,8 +117,8 @@ What stays out on purpose:
 | **P1** | **Portable code**: `[RenderConfig.Portable]` Types + Variables; all diagram code is GIL | declarations emitted into GIL; vars auto-expanded with the GIL path; action and guard code wrapped as GIL instead of raw echo | spike: done. Upstream: 1–2 weeks (make every transpiler handle field initialisers, unsigned math and user enums; explicit opt-in switch; docs) | **✅ Rust + TS** |
 | **P2** | **Time**: `after(ms)`, `elapsed(t)` | transform adds `{STATE}_entered_at` plus an entry action; text rewrite at expansion; transpilers map unsigned `+ - *` to wrapping ops | spike done: `after(ms)` trigger (grammar), `elapsed()`, generated `next_deadline_ms()`. Upstream: all transpilers, plus a decision on one-shot vs level-triggered `after()`: about 1 week | **✅ Rust + TS** |
 | P3 | Host calls and event payloads | `Functions` → a Rust trait as a generic parameter (`ManettaSm<H: ManettaHost>`) plus a TS interface; `START_BREW(uint max_ms)` → typed `dispatch_start_brew(max_ms)` | spike done (design in section 5). Upstream: 1–2 weeks to cover the other targets (C: extern functions or a function-pointer struct) and agree the design with the maintainer | **✅ Rust + TS** |
-| P4 | Diagram ergonomics | root behaviours in PlantUML; accept `left to right direction`; `in(STATE)` guard (subtree-id range check); event groups `(COMMANDS)` | about 1 week, mostly grammar plus small transforms | ◐ root behaviours done |
-| P5 | Orthogonal regions | per-region state ids, dispatch to each region, cross-region exit, `in()` across regions (see the earlier analysis) | 4–8 weeks, core algorithm; worth it once parallel parts have many rules between them (e.g. a dual-boiler steam boiler beside brewing) | ◻ (not needed for the cut-down single-heater scope) |
+| P4 | Diagram ergonomics | root behaviours in PlantUML; accept `left to right direction`; `in_state(STATE)` guard (subtree-id range check); event groups `(COMMANDS)` | about 1 week, mostly grammar plus small transforms | ◐ root behaviours and `in_state()` done |
+| **P5** | **Orthogonal regions** | per-region state ids, dispatch to each region, cross-region exit, `in_state()` across regions; PlantUML `--` / `\|\|` | spike done (section 6), Balanced2 only. Upstream: 3–5 more weeks (Balanced1 or a decision to require Balanced2, draw.io examples, all transpilers in the Spec2 suite, simulator polish, a design review of the event semantics) | **✅ Rust + TS** (experimental) |
 
 Upstream path: P1 and P2 help all eight languages, not just Rust, so they make a good first discussion with the maintainer
 (next to StateSmith/StateSmith#475 for Rust). They extend the existing `$gil(...)` mechanism (wiki "mixing GIL and user code"), rather than adding a new language.
@@ -212,8 +214,9 @@ Upstream path: P1 and P2 help all eight languages, not just Rust, so they make a
 **Next concrete steps:**
 1. Hardening for upstream: C99 and C# in portable mode (C99 needs initialisers in its ctor, and host calls as extern functions or a function-pointer struct), plus a Spec2-style portable spec run in several languages.
 2. An explicit portable-mode switch instead of "implied by the section".
-3. P4 remainder: accept `left to right direction`, an `in(STATE)` guard, event groups.
-4. A design discussion upstream (StateSmith/StateSmith#475 for Rust; portable code and time helpers as their own proposal), when you decide to.
+3. P4 remainder: accept `left to right direction`, event groups.
+4. Regions hardening (section 6, "Limits").
+5. A design discussion upstream (StateSmith/StateSmith#475 for Rust; portable code and time helpers as their own proposal), when you decide to.
 
 ## 5. P3 design: how the host gets in, and how events carry data
 
@@ -253,3 +256,91 @@ Details that follow from A:
   A stored argument keeps the algorithm unchanged and also lets guards in ancestor states read it.
 - **Shared by name:** arguments with the same name share one variable (both commands' `max_ms`), so they must agree on type.
 - **Plain dispatch still works:** `dispatch_event(START_BREW)` uses the last stored value. That's handy for replay, but the typed function is the API to use.
+
+## 6. P5: orthogonal regions, and the dual-boiler machine
+
+**Why now:** a dual-boiler machine pulls a shot and steams milk at the same time.
+Its steam boiler has its own sensor, heating/ready cycle and caps, and it shares the power budget with the pump.
+With one machine plus variables, every steam rule would have to be repeated in each brew state, or squeezed into flags and guards.
+
+**How a diagram says it:**
+- **PlantUML:** `--` (or `||`) lines inside a composite state split it into regions. PlantUML draws them the same way.
+- **draw.io:** a `$ORTHO n : NAME` group per region.
+- **Cross-region rules** use `in_state(STATE)`: true while STATE or a state inside it is active, in any region.
+
+  ```
+  state ON {
+      [*] --> STEAM_OFF
+      state STEAM_OFF
+      state STEAM_ON { STEAM_HEATING, STEAM_READY }
+      --
+      [*] --> IDLE
+      state IDLE
+      state BREWING
+      state FAULT
+  }
+  STEAM_ON : enter / set_steam_heater(!in_state(BREWING));            ' brew priority
+  ON --> OFF : do [!in_state(BREWING) && elapsed(auto_off_from) >= auto_off_min * 60000]
+  ```
+
+**Semantics** (Balanced2; every target, because it's all GIL):
+- **State:** each region has its own state id variable (`on_region_1_state_id`, ROOT while the region is inactive). `state_id` keeps the outer state, here `ON`.
+- **Events:** an event goes to every region in order. The orthogonal parent and its ancestors get it only if no region consumed it.
+  If a region's transition leaves the parent, dispatch stops there.
+- **`do`:** reaches every region and then the parent. As in StateSmith generally, `do` isn't consumed.
+- **Entering the parent** enters every region's initial state. A transition into one region's state enters the others' initial states first.
+- **Leaving the parent** exits every region (reverse order), then the parent.
+- **Nesting:** regions can nest (an orthogonal state inside a region), and history works inside a region.
+- **`in_state(X)`** compiles to a range check on X's scope variable, e.g. `self.on_region_2_state_id == StateId::BREWING`.
+- **`next_deadline_ms()`** checks each region state's timers against its own region variable.
+
+**Rejected with a clear error** (coordinate with `in_state()`, variables or events instead):
+- transitions between regions of the same parent, or from the parent into one of its regions;
+- targeting a region;
+- regions directly in the machine root;
+- behaviours on a region;
+- history that reaches into a region;
+- Balanced1.
+
+**Implementation** (on top of Balanced2, no new algorithm):
+- `OrthoState` vertices already existed in the model (draw.io parsed them); this adds the PlantUML grammar for `--` / `||`;
+- `RegionHelper`: scopes, region order, the `in_state()` rewrite;
+- `RegionValidator`;
+- in `AlgoBalanced2` / `EventHandlerBuilder2`: per-scope "exit up to" functions, region dispatch, default entry and exit;
+- the simulator: Mermaid `--` regions, highlighting per region.
+
+Existing diagrams generate exactly what they did before. Across the full suite the only committed output change is the simulator's shared JavaScript,
+which now enables event buttons for the deepest active state of each region.
+
+**Tests:**
+- `RegionsTests` (8): golden traces for 7 event sequences, identical in Rust and TypeScript (default and path entry, the same event in both regions, consumption, early stop, nested regions, history, `in_state`), plus the validation errors.
+- `ManettaDualBoilerGenTests`: the dual-boiler machine, Rust == TypeScript and polling == sleeping.
+  It also checks that the simulator shows `in_state(...)` as written.
+- Full suite: 772 pass, plus the same 92 environmental failures as the base commit.
+
+**The dual-boiler machine** (`src/test-misc/manetta-dual-boiler/`, details in its README):
+- **Shape:** ON has a steam boiler region (STEAM_OFF / STEAM_ON {HEATING, READY}) and a brew region (IDLE / BREWING / FAULT). It has four cross-region rules, each a visible `in_state()`:
+  - brew priority for the steam heater;
+  - a fault refuses steam;
+  - no auto-off during a brew;
+  - the power switch records a stopped brew.
+- **One event, both regions:** a single `FAULT_DETECTED` switches the steam boiler off *and* moves the brew region to FAULT.
+- **Scenarios:** 14, including steam and brew in parallel. The traces are identical in Rust and TypeScript, and identical polling (1,695 `do` dispatches) or sleeping until `next_deadline_ms()` (21).
+- **Cost on the board:** `no_std` riscv32imc 2,640 B `.text` against 2,372 B for the single boiler; 68 B of RAM for the machine against 64 B. Clippy-clean.
+- **Diagram:** 174 lines (the single boiler is 191). Steam no longer needs the "STEAM blocks the temperature events" workaround, nor BUSY replies between steam and brew.
+
+**Verdict:** regions fit StateSmith's existing design well. Each region is a small Balanced2 machine with its own state variable, and GIL carries the result to every language.
+The single-heater example still doesn't need them. For the dual boiler, they turn implicit coupling into separate state lists plus a handful of explicit `in_state()` rules.
+That was the risk the fault restructure exposed.
+
+**Limits:**
+- **Balanced2 only.**
+- **Event order across regions** is fixed by region order (first region first). That is deterministic, but a design choice upstream should review.
+  UML leaves it open; some tools dispatch to all regions "simultaneously" and then resolve conflicts.
+- **No cross-region transitions and no fork/join.** A transition can enter one region's state; the others take their defaults.
+- **Simulator:**
+  - "available edge" highlighting over-approximates for the parent's edges: one region consuming an event isn't reflected;
+  - "force state" doesn't know about regions.
+- **PlantUML itself (1.2024.7) can't draw** transitions written outside the composite that touch a second region, nor ones from a second region to outside states.
+  StateSmith reads both, but diagrams write them inside the block (or as a guarded parent transition) so the picture renders.
+- **Untested:** C99, C++, C#, Java, Python and JavaScript with regions. They go through the same GIL, so expect few transpiler changes.

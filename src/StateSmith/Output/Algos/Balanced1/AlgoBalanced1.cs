@@ -251,7 +251,10 @@ public class AlgoBalanced1 : IGilAlgo
             var subtree = subtrees[state];
             string first = $"{mangler.SmStateEnumType}.{mangler.SmStateEnumValue(state)}";
             string last = $"{mangler.SmStateEnumType}.{mangler.SmStateEnumValue(subtree.subtreeEndVertex)}";
-            string isActive = subtree.subtreeEndVertex == state ? $"{stateVar} == {first}" : $"{stateVar} >= {first} && {stateVar} <= {last}";
+            // a state inside an orthogonal region is tracked by its region's state id variable
+            var scope = state.Scope();
+            string var = scope == null ? stateVar : $"this.{mangler.SmRegionStateIdVarName(scope)}";
+            string isActive = subtree.subtreeEndVertex == state ? $"{var} == {first}" : $"{var} >= {first} && {var} <= {last}";
 
             file.AppendIndentedLine();
             file.AppendIndentedLine(subtree.subtreeEndVertex == state ? $"// {Vertex.Describe(state)}" : $"// {Vertex.Describe(state)} and its sub states");
